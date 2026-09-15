@@ -179,7 +179,10 @@ def _ocr_once(png):
     try:
         import pytesseract
         from PIL import Image
-        return pytesseract.image_to_string(Image.open(io.BytesIO(png)))
+        # oem 1 runs the LSTM engine only, which is roughly twice as fast as the default that also runs the legacy
+        # engine, and psm 6 tells it the page is one block of text, which a payroll statement is.
+        with Image.open(io.BytesIO(png)) as im:
+            return pytesseract.image_to_string(im, config='--oem 1 --psm 6')
     except Exception:
         pass
     with _VISION_LOCK:
@@ -217,7 +220,7 @@ def _orientation_score(text):
     return score
 
 
-def ocr_page(data: bytes, index: int, scale=2.2, hint_box=None):
+def ocr_page(data: bytes, index: int, scale=1.9, hint_box=None):
     """OCR one page. Scanned packs often contain rotated pages, so read each candidate rotation and keep the best.
     hint_box is a one-element list holding the angle that won on an earlier page of the same pack; packs are
     consistently oriented, so trying that angle first usually settles the page on the first pass."""
@@ -227,6 +230,9 @@ def ocr_page(data: bytes, index: int, scale=2.2, hint_box=None):
     order = [0, 180, 90, 270]
     if hint_box and hint_box[0] in order:
         order = [hint_box[0]] + [a for a in order if a != hint_box[0]]
+        trusted = True          # a pack is oriented the same way throughout, so one pass is normally enough
+    else:
+        trusted = False
     for angle in order:
         buf = io.BytesIO()
         with Image.open(io.BytesIO(png)) as im:
@@ -244,6 +250,8 @@ def ocr_page(data: bytes, index: int, scale=2.2, hint_box=None):
         if sc > best_score:
             best, best_score, best_angle = text, sc, angle
         if best_score >= 24:          # a clean upright statement scores well above this
+            break
+        if trusted and best_score >= 8:   # readable at the pack's known rotation: do not pay for three more passes
             break
     if best_score < 0:
         raise RuntimeError('no OCR engine available')
@@ -373,7 +381,7 @@ def paychecks_from_pdf(data: bytes, hint='', max_pages=200, progress=None, worke
         except Exception:
             pages = []
     pages = pages[:max_pages]
-    rot, done = [0], [0]
+    rot, done = [None], [0]   # filled by the first page that OCRs cleanly, then reused by the rest
 
     def work(arg):
         i, text = arg
