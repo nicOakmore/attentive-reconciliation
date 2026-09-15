@@ -175,6 +175,40 @@ def pdf_pages_text(data: bytes):
 _VISION_LOCK = threading.Lock()
 
 
+def _layout_from_items(items):
+    """Rebuild lines from (centre y, x start, x end, text, height) boxes: group by vertical position, order by x and
+    mark column breaks, so a label keeps the amount printed beside it."""
+    if not items:
+        return ''
+    heights = sorted(i[4] for i in items)
+    h = heights[len(heights) // 2] or 12
+    band, gap = max(4, h * 0.7), max(10, h * 1.6)
+    rows = {}
+    for cy, x0, x1, t, _ in items:
+        rows.setdefault(int(cy / band), []).append((x0, x1, t))
+    lines = []
+    for k in sorted(rows):
+        line, prev = [], None
+        for x0, x1, t in sorted(rows[k]):
+            if prev is not None and x0 - prev > gap:
+                line.append('|')
+            line.append(t)
+            prev = x1
+        lines.append(' '.join(line))
+    return '\n'.join(lines)
+
+
+def _layout_from_words(d):
+    """The tesseract reading, in the same line form as the RapidOCR one."""
+    items = []
+    for i, txt in enumerate(d.get('text', [])):
+        if not (txt or '').strip():
+            continue
+        items.append((d['top'][i] + d['height'][i] / 2, d['left'][i], d['left'][i] + d['width'][i],
+                      txt.strip(), d['height'][i]))
+    return _layout_from_items(items)
+
+
 def ocr_selftest():
     """What the container can actually do: which engine, which version, and how long one page takes."""
     import time
@@ -197,14 +231,58 @@ def ocr_selftest():
     return out
 
 
+TESS_CONFIG = '--oem 1 --psm 6 -c preserve_interword_spaces=1'
+_RAPID = [None]
+_RAPID_LOCK = threading.Lock()
+
+
+def _rapid_engine():
+    """RapidOCR reads these scans far more accurately than tesseract, which misreads leading digits on them."""
+    if _RAPID[0] is None:
+        with _RAPID_LOCK:
+            if _RAPID[0] is None:
+                try:
+                    from rapidocr_onnxruntime import RapidOCR
+                    _RAPID[0] = RapidOCR()
+                except Exception:
+                    _RAPID[0] = False
+    return _RAPID[0] or None
+
+
+def _rapid_read(png):
+    import numpy as np
+    from PIL import Image
+    eng = _rapid_engine()
+    if eng is None:
+        return None
+    with Image.open(io.BytesIO(png)) as im:
+        arr = np.array(im.convert('RGB'))
+    res, _ = eng(arr)
+    if not res:
+        return ''
+    items = []
+    for box, txt, _score in res:
+        xs = [p[0] for p in box]; ys = [p[1] for p in box]
+        items.append((min(ys) + (max(ys) - min(ys)) / 2, min(xs), max(xs), (txt or '').strip(), max(ys) - min(ys)))
+    return _layout_from_items(items)
+
+
 def _ocr_once(png):
+    out = None
+    try:
+        out = _rapid_read(png)
+    except Exception:
+        out = None
+    if out:
+        return out
     try:
         import pytesseract
         from PIL import Image
-        # oem 1 runs the LSTM engine only, which is roughly twice as fast as the default that also runs the legacy
-        # engine, and psm 6 tells it the page is one block of text, which a payroll statement is.
+        # Read words with their positions and rebuild the lines, because a payroll statement is columnar: the flat
+        # reading runs the deduction table into the tax lines and merges the amounts.
         with Image.open(io.BytesIO(png)) as im:
-            return pytesseract.image_to_string(im, config='--oem 1 --psm 6')
+            d = pytesseract.image_to_data(im, config=TESS_CONFIG, output_type=pytesseract.Output.DICT)
+        return _layout_from_words(d)
     except Exception:
         pass
     with _VISION_LOCK:
@@ -242,22 +320,28 @@ def _orientation_score(text):
     return score
 
 
-def ocr_page(data: bytes, index: int, scale=1.9, hint_box=None):
-    """OCR one page. Scanned packs often contain rotated pages, so the rotation is settled first on a small render,
-    which is cheap, and only the winning angle is then read at full size. hint_box carries the angle that won on an
-    earlier page of the same pack, and a pack is oriented the same way throughout."""
-    from PIL import Image
-    angle = hint_box[0] if (hint_box and hint_box[0] is not None) else None
-    if angle is None:
-        angle = _detect_rotation(data, index)
+def ocr_page(data: bytes, index: int, scale=2.8, hint_box=None):
+    """OCR one page. Nearly every pack is upright, so read it that way first and accept the reading when it comes
+    back looking like a payroll statement. Only a page that reads as noise is worth paying to rotate, and the angle
+    that rescues it is remembered for the rest of the pack."""
     png = pdf_page_png(data, index, scale=scale)
-    text = _ocr_rotated(png, angle)
-    if _orientation_score(text) < 8:        # the hint did not hold on this page, so settle it on its own
-        angle = _detect_rotation(data, index)
-        text = _ocr_rotated(png, angle)
-    if hint_box is not None and _orientation_score(text) >= 8:
-        hint_box[0] = angle
-    return text
+    first = hint_box[0] if (hint_box and hint_box[0] is not None) else 0
+    text = _ocr_rotated(png, first)
+    if _orientation_score(text) >= 8:
+        return text
+    best, best_score, best_angle = text, _orientation_score(text), first
+    for angle in (0, 180, 90, 270):
+        if angle == first:
+            continue
+        t = _ocr_rotated(png, angle)
+        sc = _orientation_score(t)
+        if sc > best_score:
+            best, best_score, best_angle = t, sc, angle
+        if best_score >= 24:
+            break
+    if hint_box is not None and best_score >= 8 and best_angle != 0:
+        hint_box[0] = best_angle          # a pack that is rotated is rotated throughout
+    return best
 
 
 def _ocr_rotated(png, angle):
@@ -325,6 +409,40 @@ def pdf_page_png(data: bytes, index: int, scale=2.0):
         doc.close()
 
 
+COMPACT_PATTERNS = {
+ 'gross': [r'standardgross', r'totalgross', r'grosspay'],
+ 'federal': [r'w[a-z]{0,4}ho[il1]d[il1]ngtax', r'federa[li](income)?tax', r'fedw[/]?h', r'f[il1]twh'],
+ 'state': [r'statetax', r'statew[/]?h'],
+ 'social_security': [r'f[il1]catax', r'soc[il1]a[li]secur[il1]ty', r'oasd[il1]'],
+ 'medicare': [r'med[il1]caretax', r'med[il1]?cerotax', r'med[a-z]{0,3}caretax'],
+ 'taxable_wages': [r'taxab[li]ewages'],
+ 'medicare_gross': [r'med[il1]caregross', r'med[a-z]{0,3}caregross'],
+ 'net_pay': [r'n[eo]t?pay', r'netchec?k'],
+ 'retirement': [r'trssa[li]aryred', r'403b', r'457', r'ret[il1]rement'],
+ 'retirement_insurance': [r'trs[il1]nsurance'],
+ 'premium': [r'pcmpretax', r'pcmpt', r'pcmppretax'],
+ 'reimbursement': [r's[il1]mrp'],
+ 'fee': [r'pcmaftertax', r'pcmat', r'pcmpposttax'],
+ 'product': [r'^s[il1]a$', r'suppinsurance'],
+ 'other_total': [r'totalotherdeduct[il1]?ons'],
+ 'total_deductions': [r'totaldeduct[il1]?ons'],
+}
+
+
+def _compact(line):
+    return re.sub(r'[^a-z0-9]', '', line.lower())
+
+
+def _first_amount(line):
+    """The this period column is the first amount printed after the label, so take that one."""
+    body = line.split(':', 1)[1] if ':' in line else line
+    for m in NUM.finditer(body):
+        v = num(m.group(0))
+        if v is not None:
+            return v
+    return None
+
+
 def _amount_for(line, label_match):
     """Take the amount adjacent to the label. A statement prints this period next to the label and year to date beyond
     it. OCR of a rotated page reverses the order, so the value can sit immediately to the left instead."""
@@ -355,11 +473,22 @@ def parse_text_paycheck(text):
             if v is not None:
                 out.setdefault(field, v)
                 break
+    for field, pats in COMPACT_PATTERNS.items():
+        if out.get(field) is not None:
+            continue
+        for line in text.split('\n'):
+            c = _compact(line)
+            if not any(re.search(p, c) for p in pats):
+                continue
+            v = _first_amount(line)
+            if v is not None:
+                out[field] = v
+                break
     for pat in (r'employee\s*name\s*:?\s*\|?\s*([^|\n]{3,60})',
                 r'^([A-Z][A-Z\'-]+(?: [A-Z]{2,})?, [A-Z][A-Za-z ,.\'-]{2,40})$'):
         m = re.search(pat, text, re.I | re.M)
         if m:
-            nm = m.group(1).strip().rstrip(':,').strip()
+            nm = re.split(r'\s*pay\s*[cg]am?pus|\s{3,}', m.group(1))[0].strip().rstrip(':,').strip()
             if nm and not nm.lower().startswith(('pay campus', 'campus')):
                 out['name'] = nm
                 break
@@ -367,45 +496,59 @@ def parse_text_paycheck(text):
     if m:
         out['employee_id'] = m.group(1)
     # Net pay is printed three times over: on its own line, as the direct deposit total, and as gross less total
-    # deductions. A scan that misreads one digit disagrees with itself, so take the value two sources agree on.
-    cands = []
-    if out.get('net_pay') is not None:
-        cands.append(('line', out['net_pay']))
+    # deductions. Take the value two of them agree on. Failing that, trust the deposit block, which stands on its
+    # own and is not read across the deduction columns beside it.
+    plaus = lambda v: v is not None and out.get('gross') and 0.25 * out['gross'] <= v <= out['gross']
+    line_v = out.get('net_pay')
     dep = _deposit_total(text)
-    if dep is not None:
-        cands.append(('deposit', dep))
-    if out.get('gross') is not None and out.get('total_deductions') is not None:
-        cands.append(('gross less deductions', r2(out['gross'] - out['total_deductions'])))
-    agreed = None
-    for i, (_, v) in enumerate(cands):
-        if any(abs(v - w) <= 0.02 for j, (_, w) in enumerate(cands) if j != i):
-            agreed = v
-            break
+    derived = (r2(out['gross'] - out['total_deductions'])
+               if out.get('gross') is not None and out.get('total_deductions') is not None else None)
+    cands = [('line', line_v), ('deposit', dep), ('gross less deductions', derived)]
+    cands = [(k, v) for k, v in cands if v is not None]
+    agreed = next((v for i, (_, v) in enumerate(cands)
+                   if any(abs(v - w) <= 0.02 for j, (_, w) in enumerate(cands) if j != i)), None)
+    pick, why = None, None
     if agreed is not None:
-        if out.get('net_pay') is not None and abs(out['net_pay'] - agreed) > 0.02:
-            out['net_pay_corrected'] = f"net pay read as {out['net_pay']:.2f} disagreed with the other two printings, " \
-                                       f"taken as {agreed:.2f}"
-        out['net_pay'] = agreed
-    elif out.get('net_pay') is None and dep is not None:
-        out['net_pay'] = dep
+        pick, why = agreed, None
+    elif plaus(dep):
+        pick, why = dep, 'taken from the direct deposit total'
+    elif plaus(line_v):
+        pick = line_v
+    if pick is not None:
+        if line_v is not None and abs(line_v - pick) > 0.02:
+            out['net_pay_corrected'] = (f"net pay read as {line_v:.2f} does not hold against the other printings, "
+                                        f"{why or 'taken as'} {pick:.2f}")
+        out['net_pay'] = pick
     elif len(cands) > 1:
-        # No two printings agree. Net pay is a large fraction of gross, so if exactly one candidate can be a net
-        # pay at all, that is the reading; otherwise say the line is unreliable rather than guess.
-        g = out.get('gross')
-        fits = [v for _, v in cands if g and 0.25 * g <= v <= g] if g else []
-        if len(fits) == 1:
-            if out.get('net_pay') is not None and abs(out['net_pay'] - fits[0]) > 0.02:
-                out['net_pay_corrected'] = (f"net pay read as {out['net_pay']:.2f} cannot be a net pay against gross "
-                                            f"{g:.2f}, taken as {fits[0]:.2f} from the deposit total")
-            out['net_pay'] = fits[0]
-        else:
-            out['net_pay_unreliable'] = [v for _, v in cands]
+        out['net_pay_unreliable'] = [v for _, v in cands]
+        out['net_pay'] = None
+    fed = _federal_from_deductions(out)
+    if fed is not None:
+        if out.get('federal') is None:
+            out['federal'] = fed
+            out['federal_derived'] = True
+        # A disagreement between the withholding line and the printed deduction total is not by itself evidence of
+        # a misreading: the totals block prints its own subtotals and the scan reads those columns unevenly. The
+        # net pay identity is the check that decides whether an employee is reported as verified.
     if out.get('taxable_wages') is None and out.get('medicare_gross') is not None and out.get('retirement'):
         # A retirement reduction lowers federal taxable wages and leaves Medicare wages alone, so the taxable wages
         # line can be recovered when the scan loses it.
         out['taxable_wages'] = r2(out['medicare_gross'] - out['retirement'])
         out['taxable_wages_derived'] = True
     return out
+
+
+def _federal_from_deductions(out):
+    """The statement prints every deduction and their total, so federal withholding is the total less the rest.
+    That arithmetic is printed on the page, which makes it a check on the scan rather than an assumption."""
+    total = out.get('total_deductions')
+    if total is None:
+        return None
+    parts = [out.get(k) for k in ('social_security', 'medicare', 'retirement', 'retirement_insurance', 'other_total')]
+    if out.get('medicare') is None or out.get('other_total') is None:
+        return None
+    v = r2(total - sum(x or 0 for x in parts))
+    return v if -0.01 <= v <= total else None
 
 
 def _deposit_total(text):

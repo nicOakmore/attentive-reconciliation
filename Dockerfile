@@ -1,5 +1,8 @@
 FROM python:3.12-slim
-RUN apt-get update && apt-get install -y --no-install-recommends tesseract-ocr libtesseract-dev \
+# RapidOCR reads these scanned statements accurately; tesseract stays as a fallback. libgomp is needed by
+# onnxruntime and libglib by the opencv build it loads.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    tesseract-ocr libtesseract-dev libgomp1 libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY requirements.txt .
