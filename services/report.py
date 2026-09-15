@@ -72,7 +72,8 @@ def _census_sentence(a):
     if c.retirement_401k:
         bits.append(f"census field R contains {money(c.retirement_401k)} for retirement")
     s = ('The engine received no pre-tax deduction from the census.' if not bits else
-         f"The census supplies {', '.join(bits)}. The engine receives {money(a.census_pretax)} as the total pre-tax deduction.")
+         f"On the census, {', '.join(bits)}. The engine receives {money(a.census_pretax)} as the total pre-tax "
+         f"deduction.")
     if a.retirement_not_in_census and abs(a.retirement_not_in_census) > 0.02:
         s += (f" The payroll reduces federal taxable wages by a further {money(a.retirement_not_in_census)} each month "
               f"for retirement, and no census field carries it.")
