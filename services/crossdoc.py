@@ -49,24 +49,24 @@ def expectations(census, engine, pay_periods=12, which='before') -> Dict[str, Ex
 
     if census is not None and census.gross_annual:
         out['gross'] = Expect('gross', round(census.gross_annual / pp, 2), max(1.0, census.gross_annual * 0.02 / pp),
-                              f'census annual taxable wages {census.gross_annual:,.2f} over {pp} pay periods')
+                              f'the census annual salary of {census.gross_annual:,.2f} over {pp} pay periods')
     if census is not None and census.retirement_401k:
         out['retirement'] = Expect('retirement', round(per_pay(census.retirement_401k), 2),
                                    max(5.0, per_pay(census.retirement_401k) * 0.25),
-                                   f'census monthly retirement {census.retirement_401k:,.2f}')
+                                   f'the census monthly retirement figure of {census.retirement_401k:,.2f}')
     if engine is not None and engine.premium:
         v = round(per_pay(engine.premium), 2)
         if which == 'after':
-            out['premium'] = Expect('premium', v, max(1.0, v * 0.02), f'proposal premium {engine.premium:,.2f}')
+            out['premium'] = Expect('premium', v, max(1.0, v * 0.02), f'the proposal premium of {engine.premium:,.2f}')
             out['reimbursement'] = Expect('reimbursement', -v, max(1.0, v * 0.02),
-                                          f'proposal premium returned as a reimbursement')
+                                          'the proposal premium, returned as a reimbursement')
         else:
-            out['premium'] = Expect('premium', 0.0, 0.01, 'the statement before the premium carries no premium line')
+            out['premium'] = Expect('premium', 0.0, 0.01, 'a payslip from before the premium has no premium line')
     if engine is not None and engine.fee is not None:
         v = round(per_pay(engine.fee), 2)
         out['fee'] = Expect('fee', v if which == 'after' else 0.0, max(1.0, abs(v) * 0.05),
-                            f'proposal employee fee {engine.fee:,.2f}' if which == 'after'
-                            else 'the statement before the premium carries no fee line')
+                            f'the proposal employee fee of {engine.fee:,.2f}' if which == 'after'
+                            else 'a payslip from before the premium has no fee line')
     if engine is not None:
         ti = engine.taxable_income_before if which == 'before' else engine.taxable_income_after
         if ti:
@@ -74,11 +74,11 @@ def expectations(census, engine, pay_periods=12, which='before') -> Dict[str, Ex
             # The engine's taxable income is calculated from the census, so it is not independent of it, and it is
             # the figure whose correctness the audit is testing. Recorded for comparison, never as evidence.
             out['medicare_gross'] = Expect('medicare_gross', v, max(5.0, v * 0.08),
-                                           f'proposal taxable income {ti:,.2f}', auditable=False)
+                                           f'the proposal taxable income of {ti:,.2f}', auditable=False)
     if engine is not None and engine.federal_before:
         out['federal'] = Expect('federal', round(per_pay(engine.federal_before), 2),
                                 max(10.0, per_pay(engine.federal_before) * 0.5),
-                                f'proposal federal withholding before the premium {engine.federal_before:,.2f}',
+                                f'the proposal federal withholding before the premium of {engine.federal_before:,.2f}',
                                 auditable=False)
     return out
 

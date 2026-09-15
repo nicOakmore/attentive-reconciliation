@@ -409,7 +409,7 @@ def most_likely_reading(rec, field_name, cal=None, expectations=None, margin=2.0
 
 
 # ----------------------------------------------------------------- how much it matters
-def gap_interval(before, after, allotment, pay_periods=12, fee=None, draws=20000, cal=None, seed=12345,
+def gap_interval(before, after, allotment, pay_periods=12, fee=None, draws=4000, cal=None, seed=12345,
                  materiality=25.0, outliers=None):
     """Monte Carlo on the conclusion: the gap between the promised allotment and the actual net pay change.
 
@@ -426,42 +426,37 @@ def gap_interval(before, after, allotment, pay_periods=12, fee=None, draws=20000
     if not before or not after or before.get('net_pay') is None or after.get('net_pay') is None:
         return dict(note='both statements need a net pay before an interval can mean anything')
     rng = np.random.default_rng(seed)
-    per_month = lambda v: v * (pay_periods / 12.0)
+    per_month = pay_periods / 12.0
     fields = ('net_pay', 'federal', 'state', 'social_security', 'medicare', 'fee')
     sds = {f: observation_sd(f, None, cal) for f in fields}
     base_rate = float(cal.get('outlier_rate') or 0.05)
     outliers = outliers or {}
-    # Two ways a reading can be wrong, and the interval has to carry both: the ordinary cent level noise, and the
-    # chance that the figure is not the printed one at all, in which case the draw comes from the alternative
-    # readings the scan could have produced. Without the second part the interval is a few cents wide and says
-    # nothing useful about a statement that does not tie.
-    alt = {}
-    for tag, rec in (('b', before), ('a', after)):
-        for f in fields:
-            v = rec.get(f)
-            if v is None:
-                continue
-            cands = list(candidates(v, cal).items())
-            if cands:
-                alt[(tag, f)] = cands
-    gaps = []
-    for _ in range(int(draws)):
-        b = dict(before); a = dict(after)
-        for tag, rec in (('b', b), ('a', a)):
-            for f in fields:
-                if rec.get(f) is None:
-                    continue
-                p_bad = float(outliers.get((tag, f), outliers.get(f, base_rate)))
-                if alt.get((tag, f)) and rng.random() < p_bad:
-                    vals = [v for v, _ in alt[(tag, f)]]
-                    wts = np.array([w for _, w in alt[(tag, f)]], dtype=float)
-                    wts = wts / wts.sum() if wts.sum() > 0 else None
-                    rec[f] = float(rng.choice(vals, p=wts))
-                else:
-                    rec[f] = rec[f] + rng.normal(0.0, sds[f])
-        actual = per_month((a['net_pay'] - b['net_pay']) + (a.get('product') or 0.0))
-        gaps.append(actual - (allotment or 0.0))
-    g = np.array(gaps)
+    n = int(draws)
+
+    def samples(tag, rec, f):
+        """All draws for one figure at once. Two ways a reading can be wrong and the interval carries both: the
+        ordinary cent level noise, and the chance the figure is not the printed one at all, in which case the draw
+        comes from the readings the scan could have produced instead."""
+        v = rec.get(f)
+        if v is None:
+            return None
+        noisy = v + rng.normal(0.0, sds[f], n)
+        cands = list(candidates(v, cal).items())
+        p_bad = float(outliers.get((tag, f), outliers.get(f, base_rate)))
+        if not cands or p_bad <= 0:
+            return noisy
+        vals = np.array([c for c, _ in cands], dtype=float)
+        w = np.array([max(x, 1e-9) for _, x in cands], dtype=float)
+        w = w / w.sum()
+        alt = rng.choice(vals, size=n, p=w)
+        return np.where(rng.random(n) < p_bad, alt, noisy)
+
+    nb = samples('b', before, 'net_pay')
+    na = samples('a', after, 'net_pay')
+    if nb is None or na is None:
+        return dict(note='both payslips need a take home figure before a range can mean anything')
+    gaps = ((na - nb) + float(after.get('product') or 0.0)) * per_month - (allotment or 0.0)
+    g = np.asarray(gaps)
     lo, hi = np.percentile(g, [2.5, 97.5])
     p_material = float(np.mean(np.abs(g) > materiality))
     return dict(median=round(float(np.median(g)), 2), low=round(float(lo), 2), high=round(float(hi), 2),

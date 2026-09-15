@@ -169,10 +169,10 @@ def employee_block(doc, a, client=''):
                 _p(doc, f"Engine taxable income before of {money(a.engine.taxable_income_before)} differs from payroll "
                         f"taxable wages of {money(round((a.before.taxable_wages or 0) * a.pay_periods / 12, 2))} by {money(gap)}.")
     _keep(_p(doc, 'Cause', size=9.5, bold=True, color=NAVY, space_after=2))
-    named = [f for f in a.findings if f.label not in ('Match', 'Unattributed', 'Statement not provided')]
+    named = [f for f in a.findings if f.label not in ('Match', 'No cause could be established', 'No payslip found for this employee')]
     if a.verdict_class == 'green':
         _p(doc, 'No discrepancy identified. The engine allotment equals the actual net pay change.')
-    elif any(f.label == 'Statement not provided' for f in a.findings):
+    elif any(f.label == 'No payslip found for this employee' for f in a.findings):
         _p(doc, 'No payroll statement in the packs supplied matched this employee, so the engine figures stand '
                 'unreconciled. This is a coverage limit of the files, not a discrepancy.')
     elif not named:
@@ -266,35 +266,37 @@ def _verdict_sentence(a):
 
 
 def _resolution(a):
+    """What to do next, in words the person holding the census can act on."""
     if a.verdict_class == 'green':
-        return 'No data correction required. The engine and the payroll reconcile to the cent.'
+        return 'Nothing to do. The payslips and the proposal agree to the cent.'
     for f in a.findings:
-        if f.label in ('Retirement deduction not in the census', 'Federal taxable wage reduction not in the census'):
+        if f.label in ('Retirement deduction missing from the census', 'A pre-tax deduction is missing from the census'):
             base = (a.census.pretax_other or 0)
-            return (f"Resolution candidate: verify {money(f.amount)} a month against the census input specification. "
-                    f"If field Q is the designated input for it, the field becomes "
-                    f"{money(round(base + (f.amount or 0), 2))}; rerun the calculation and compare again.")
-        if f.label == 'Cafeteria deduction not in the census':
-            return (f"Resolution candidate: verify the pre-tax deduction of {money(f.amount)} against the census "
-                    f"input specification, add it to the designated field and rerun the calculation.")
-        if f.label == 'W-4 withholding instruction':
-            return ('Resolution candidate: reconcile the W-4 held by payroll with the W-4 data on the census, then '
-                    'rerun the calculation on the agreed instruction.')
+            return (f"What to do: check where {money(f.amount)} a month of pre-tax deductions belongs on the "
+                    f"census. If it goes in the same field as the other pre-tax deductions, that field becomes "
+                    f"{money(round(base + (f.amount or 0), 2))}. Then run the proposal again and compare.")
+        if f.label == 'A pre-tax deduction is missing from the census':
+            return (f"What to do: find the {money(f.amount)} a month deduction on the payslip, add it to the census "
+                    f"as a pre-tax deduction, and run the proposal again.")
+        if f.label == 'The W-4 on payroll differs from the census':
+            return ('What to do: agree which W-4 details are current, payroll\'s or the census\'s, correct the '
+                    'census and run the proposal again.')
     labels = {f.label for f in a.findings}
-    if 'Statement identity does not tie' in labels:
-        return ('No correction is supported. The statement lines do not reconcile to the net pay change, so this '
-                'employee is reported unverified pending a manual check of the statement.')
-    if 'Other changed earning or deduction' in labels:
-        return ('No census correction applies. Something other than the premium changed between the two statements, '
-                'so the pair is not a like for like comparison. Obtain a mock statement that changes only the premium.')
-    if 'Fixed federal withholding' in labels:
-        return 'No data correction available. Payroll withholds a fixed federal amount for this employee.'
-    if labels & {'Withholding method or configuration difference', 'State withholding'}:
-        return ('No census correction applies. The difference arises from the withholding parameters each system '
-                'holds, not from the census input.')
-    if 'Unattributed' in labels:
-        return 'The difference is documented. No corrective action is supported by the submitted data.'
-    return 'The difference is documented.'
+    if 'The statement does not add up' in labels:
+        return ('What to do: look at this employee\'s two payslips. Their own figures do not add up, so nothing '
+                'can be concluded until someone checks them.')
+    if 'Something else changed between the two payslips' in labels:
+        return ('What to do: ask for a mock payslip that changes only the premium. Something else changed on this '
+                'one, so the two cannot be compared.')
+    if 'Payroll withholds a fixed federal amount' in labels:
+        return ('Nothing to correct on the census. Payroll withholds a fixed federal amount for this employee, so '
+                'the premium cannot produce a federal saving. The proposal should not promise one.')
+    if labels & {'Payroll and the proposal use different tax tables', 'State withholding'}:
+        return ('Nothing to correct on the census. The difference comes from the tax tables each system holds, not '
+                'from the data entered.')
+    if 'No cause could be established' in labels:
+        return 'The difference is recorded. The files provided do not show what caused it.'
+    return 'The difference is recorded.'
 
 
 def build(audits, summary, notes, client='', files=None, ai_paragraph='', period=''):

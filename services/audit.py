@@ -181,28 +181,31 @@ def audit_employee(emp: EmployeeAudit) -> EmployeeAudit:
         emp.ti_before_gap = r2(e.taxable_income_before - per_month(b.medicare_gross, pp))
 
     emp.findings = _attribute(emp)
-    emp.verdict, emp.verdict_class = _verdict(emp)
     emp.uncertainty = _uncertainty(emp)
     if emp.uncertainty:
         for st in (emp.uncertainty.get('statements') or []):
             for nm, r in (st.get('residuals') or {}).items():
                 if 'exceed gross less net pay' in nm:
                     emp.findings.append(Finding(
-                        'Statement lines cannot all be right', r2(r),
-                        f"On the {st['statement']} statement the deduction lines read add to {_m(r)} more than the "
-                        f"difference between gross pay and net pay. That is impossible on a single statement, so at "
-                        f"least one of those lines was not read as printed. The employee is reported unverified and "
-                        f"the lines are listed for checking."))
+                        'The deductions add up to more than the pay', r2(r),
+                        f"On the {st['statement']} payslip the deductions add up to {_m(r)} more than the gap "
+                        f"between gross pay and take home pay, which cannot be right. One of the figures was "
+                        f"probably read wrongly from the scan. This employee is marked as not verified: please "
+                        f"check that payslip."))
     if emp.uncertainty and emp.uncertainty.get('cross_document'):
         for d in emp.uncertainty['cross_document'].get('disagreements', []):
             for item in d['items']:
                 emp.findings.append(Finding(
-                    'Statement disagrees with another document',
+                    'The statement and the proposal disagree',
                     r2(item['read'] - item['expected']),
-                    f"On the {d['statement']} statement the {item['field'].replace('_', ' ')} line reads "
-                    f"{_m(item['read'])} where {item['source']} implies {_m(item['expected'])}. Neither document is "
-                    f"assumed correct: this is a disagreement between the payroll, the census and the proposal, and "
-                    f"it is reported as one."))
+                    f"On the {d['statement']} payslip the {item['field'].replace('_', ' ')} line shows "
+                    f"{_m(item['read'])}, but {item['source']} says it should be {_m(item['expected'])}. One of the "
+                    f"two is wrong and this tool does not assume which, so both figures are shown."))
+    # Decided last, once every finding is in: deciding it earlier let an employee be called correct while carrying
+    # a finding that says the payslip cannot be trusted.
+    emp.verdict, emp.verdict_class = _verdict(emp)
+    if len(emp.findings) > 1:
+        emp.findings = [f for f in emp.findings if f.label != 'Match']
     return emp
 
 
@@ -297,7 +300,7 @@ def _uncertainty(emp):
                 f = E.solve({k: getattr(pc, k, None) for k in E.FIELDS})
                 for name, p in f.outlier.items():
                     outl[(tag, name)] = p
-            iv = E.gap_interval(b, a, emp.engine.allotment, pay_periods=emp.pay_periods, draws=20000,
+            iv = E.gap_interval(b, a, emp.engine.allotment, pay_periods=emp.pay_periods, draws=4000,
                                 outliers=outl)
             if iv.get('median') is not None:
                 out['gap_interval'] = iv
@@ -323,7 +326,7 @@ def _attribute(emp: EmployeeAudit) -> list:
     out, b, a, e = [], emp.before, emp.after, emp.engine
     if emp.allotment_gap is not None and abs(emp.allotment_gap) <= CENT:
         out.append(Finding('Match', emp.allotment_gap,
-                           'The engine allotment equals the actual net pay change.'))
+                           'The employee takes home exactly what the proposal promised.'))
         return out
     if emp.retirement_not_in_census and abs(emp.retirement_not_in_census) > CENT:
         # The arithmetic establishes a reduction of federal taxable wages that stays in Medicare wages. Only the
@@ -335,40 +338,42 @@ def _attribute(emp: EmployeeAudit) -> list:
             # statement names part of it on a retirement line; any remainder is a further pre-tax deduction the
             # statement does not name, and saying so is the difference between a figure a reader can check and a
             # sentence that quotes one number while claiming another.
-            detail = (f'Medicare wages exceed federal taxable wages by {_m(emp.retirement_not_in_census)} a month '
-                      f'and no census field carries it, so the engine calculated on income the payroll does not tax '
-                      f'for federal purposes. ')
+            detail = (f'The payslip takes {_m(emp.retirement_not_in_census)} a month off this employee\'s pay '
+                       f'before federal tax is worked out, and the census does not show it. The proposal therefore '
+                       f'calculated tax on more income than payroll actually taxes. ')
             if abs(unnamed) <= 0.02:
-                detail += (f'The statement names it on a retirement reduction line of {_m(named)} a month. ')
+                detail += (f'The payslip shows it as a retirement deduction of {_m(named)} a month. ')
             else:
-                detail += (f'The statement names {_m(named)} of it on a retirement reduction line; the remaining '
-                           f'{_m(unnamed)} a month is a further deduction that reduces federal taxable wages and '
-                           f'stays in Medicare wages, which the statement does not name. ')
-            detail += ('The Social Security and Medicare treatment of these deductions follows the payroll lines, '
-                       'not this finding.')
-            out.append(Finding('Retirement deduction not in the census', emp.retirement_not_in_census, detail))
+                detail += (f'The payslip shows {_m(named)} of it as a retirement deduction. The other '
+                            f'{_m(unnamed)} a month is another deduction taken before federal tax, which the payslip '
+                            f'does not name. Both are missing from the census. ')
+            detail += ('This is about federal tax only: Social Security and Medicare are unaffected, as the '
+                        'payslip itself shows.')
+            out.append(Finding('Retirement deduction missing from the census', emp.retirement_not_in_census, detail))
         else:
-            out.append(Finding('Federal taxable wage reduction not in the census', emp.retirement_not_in_census,
-                               'Medicare wages exceed federal taxable wages by this amount each month, so a deduction '
-                               'reduces federal taxable wages and stays in FICA wages. No census field carries it. '
-                               'The statement does not name the deduction, so it is reported as a wage reduction '
-                               'rather than classified.'))
+            out.append(Finding('A pre-tax deduction is missing from the census', emp.retirement_not_in_census,
+                               'The payslip takes this amount off the pay each month before federal tax is worked '
+                               'out, and the census does not show it, so the proposal calculated tax on more income '
+                               'than payroll taxes. The payslip does not say what the deduction is for, so it is '
+                               'reported as it stands rather than guessed at.'))
     if emp.ti_before_gap is not None and abs(emp.ti_before_gap) > CENT and (emp.retirement_not_in_census or 0) == 0:
-        out.append(Finding('Cafeteria deduction not in the census', emp.ti_before_gap,
-                           'The engine Taxable Income Before differs from the paycheck Medicare Gross by this amount, '
-                           'so a pre-tax deduction on the paycheck is missing from the census.'))
+        out.append(Finding('A pre-tax deduction is missing from the census', emp.ti_before_gap,
+                           'The income the proposal started from is higher than the income on the payslip by this '
+                           'amount, which means a deduction taken before tax on the payslip is not in the census.'))
     # extra withholding shows as the same difference before and after the premium
     if b.federal is not None and a.federal is not None and abs(b.federal - a.federal) > CENT:
         if b.federal == a.federal:
             pass
     if b.federal is not None and a.federal is not None and b.federal == a.federal and b.federal > 0:
-        out.append(Finding('Fixed federal withholding', per_month(b.federal, emp.pay_periods),
-                           'Payroll withholds the same federal amount before and after the premium, so the deduction '
-                           'produces no federal saving for this employee.'))
+        out.append(Finding('Payroll withholds a fixed federal amount', per_month(b.federal, emp.pay_periods),
+                           'Payroll takes the same federal tax before and after the premium, so this employee gets '
+                           'no federal tax saving from it at all. The amount shown is the federal tax being withheld '
+                           'each month regardless.'))
     if a.federal == 0 and b.federal not in (None, 0):
-        out.append(Finding('Withholding exhausted', per_month(b.federal, emp.pay_periods),
-                           'Federal withholding reaches zero after the premium: the deduction returns all of it and no more '
-                           'is available.'))
+        out.append(Finding('No federal tax left to save', per_month(b.federal, emp.pay_periods),
+                           'Federal tax falls to nothing once the premium is deducted. The employee gets back all '
+                           'the federal tax there was, and no more, so the saving cannot reach the amount the '
+                           'proposal promised.'))
     # W-4 instructions, compared with the census rather than inferred from a gap
     w4 = []
     cen_status = (emp.census.filing_status or '').strip().upper()[:1]
@@ -384,91 +389,93 @@ def _attribute(emp: EmployeeAudit) -> list:
     if b.w4_multijob == 'Y' and not (emp.census.step2c or '').strip():
         w4.append('the statement marks the W-4 multiple jobs box and the census does not')
     if w4:
-        out.append(Finding('W-4 withholding instruction', None,
-                           'The withholding instruction on the payroll differs from the census input: '
-                           + '; '.join(w4) + '. Withholding calculated on different W-4 inputs does not match.'))
+        out.append(Finding('The W-4 on payroll differs from the census', None,
+                           'Payroll and the census hold different W-4 details: ' + '; '.join(w4) +
+                           '. Tax worked out from different W-4 details will not agree.'))
 
     # something other than the premium moved between the two statements
     if b.gross is not None and a.gross is not None and abs(a.gross - b.gross) > CENT:
-        out.append(Finding('Other changed earning or deduction', per_month(a.gross - b.gross, emp.pay_periods),
-                           'Gross pay differs between the two statements, so an earning changed as well as the '
-                           'premium and the comparison is not like for like. This cause is raised only from gross '
-                           'pay, which the scan reads reliably; its absence does not establish that no other '
-                           'payroll line changed.'))
+        out.append(Finding('Something else changed between the two payslips', per_month(a.gross - b.gross, emp.pay_periods),
+                           'Gross pay is not the same on the two payslips, so something changed besides the '
+                           'premium and the two are not comparable. Ask for a mock payslip that changes only the '
+                           'premium. This check looks at gross pay only, so other changes may still be present.'))
     # A movement in the statement's own "other deductions" total is not used as evidence here: on a scanned pack
     # that total is one of the least reliably read figures, and an untied identity is reported as such instead.
     for tag, pc in (('before', b), ('after', a)):
         d = getattr(pc, 'net_pay_disputed', None)
         if d:
-            out.append(Finding('Net pay printings disagree', d.get('difference'),
-                               f"On the {tag} statement the line labelled net pay reads {_m(d.get('line'))} while "
-                               f"the rest of the page gives {_m(d.get('corroborated'))} "
-                               f"({', '.join(d.get('sources') or [])}). The figure used is the corroborated one and "
-                               f"the employee is reported unverified: choosing between two printed figures is not "
-                               f"something this tool does silently."))
+            out.append(Finding('The statement shows two different net pay figures', d.get('difference'),
+                               f"The {tag} payslip shows take home pay twice and the two do not agree: the net pay "
+                               f"line says {_m(d.get('line'))} and the rest of the payslip says "
+                               f"{_m(d.get('corroborated'))}. The reconciliation uses "
+                               f"{_m(d.get('corroborated'))}, and this employee is marked as not verified rather "
+                               f"than the tool quietly picking one."))
     identity_broken = emp.identity_gap is not None and abs(emp.identity_gap) > 2.0
-    explained = any(f.label == 'Other changed earning or deduction'
+    explained = any(f.label == 'Something else changed between the two payslips'
                     and f.amount is not None and abs(abs(f.amount) - abs(emp.identity_gap or 0)) <= 2.0
                     for f in out)
     # An untied identity is reported as an untied identity. The tool does not decide which line is at fault: a
     # misreading, an unusual payroll treatment and an omitted line all produce the same arithmetic.
     federal_in_doubt = b.federal_unreliable is not None or a.federal_unreliable is not None
     if identity_broken and not explained:
-        out.append(Finding('Statement identity does not tie', emp.identity_gap,
-                           'The withholding savings plus the Social Security and Medicare savings less the employee fee '
-                           'do not reconcile to the net pay change on these statements'
+        out.append(Finding('The statement does not add up', emp.identity_gap,
+                           'The figures on the two payslips do not add up: the tax saved, less the employee fee, '
+                           'does not come to the change in take home pay'
                            + ('' if getattr(emp, 'fee_from_statement', False) else ', and the employee fee was taken from the '
                               'proposal because the statement prints no after-tax fee line') +
-                           '. The tool does not infer which line is responsible and does not treat this employee as '
-                           'verified. Check the statement by hand.'))
+                           '. This tool will not guess which line is wrong, so this employee is marked as not '
+                           'verified. Someone should look at the two payslips.'))
     if not federal_in_doubt and emp.federal_gap is not None and abs(emp.federal_gap) > CENT:
-        out.append(Finding('Withholding method or configuration difference', emp.federal_gap,
-                           'The payroll provider\'s withholding implementation and the engine\'s withholding '
-                           'parameters produce different intermediate withholding amounts, which moves the saving '
-                           'where the premium falls across a rate boundary. This is not by itself evidence of an '
-                           'engine calculation error, and it is not a statement that either set of parameters is '
-                           'the authoritative one for compliance.'))
+        out.append(Finding('Payroll and the proposal use different tax tables', emp.federal_gap,
+                           'Payroll and the proposal use different federal tax tables, so they work out slightly '
+                           'different tax on the same pay, and the saving lands in a different place. This is a '
+                           'settings difference between two systems, not a mistake in either calculation, and '
+                           'nothing here says which set of tables is the right one.'))
     if emp.state_gap is not None and abs(emp.state_gap) > CENT:
-        detail = 'State withholding differs from the engine calculation.'
+        detail = ('State tax on the payslip differs from what the proposal worked out by this amount.')
         if emp.before.state_code == 'MO':
-            detail = ('Missouri withholds in whole dollars each pay period while the engine calculates to the cent, '
-                      'and the state parameter sets differ.')
+            detail = ('Missouri rounds state tax to whole dollars on each payslip while the proposal works to the '
+                      'cent, so a small difference every pay period is expected.')
         out.append(Finding('State withholding', emp.state_gap, detail))
     if emp.fica_gap is not None and abs(emp.fica_gap) > CENT:
         out.append(Finding('Social Security and Medicare', emp.fica_gap,
-                           'The Social Security and Medicare lines on the two statements differ from the engine '
-                           'calculation by this amount. Verify the employee\'s Social Security coverage and the '
-                           'per-pay rounding on the payroll before attributing it.'))
+                           'Social Security and Medicare on the payslips differ from the proposal by this amount. '
+                           'Before treating it as a fault, check whether this employee pays into Social Security at '
+                           'all, and allow for payroll rounding each pay period.'))
     if not out and emp.before.net_pay is None and emp.after.net_pay is None:
-        out.append(Finding('Statement not provided', None,
-                           'No payroll statement in the uploaded packs matched this employee, so there is nothing to '
-                           'reconcile the engine against. This is a coverage limit of the files, not a finding.'))
+        out.append(Finding('No payslip found for this employee', None,
+                           'None of the payslips uploaded belong to this employee, so there is nothing to compare '
+                           'the proposal against. This is about the files provided, not about the employee.'))
     elif not out:
-        out.append(Finding('Unattributed', emp.allotment_gap,
-                           'The available files do not explain this difference. The paycheck lines needed for the '
-                           'reconciliation are missing or unreadable.'))
+        out.append(Finding('No cause could be established', emp.allotment_gap,
+                           'The files provided do not explain this difference. The payslip lines needed to work it '
+                           'out are missing or could not be read.'))
     return out
 
 
 def _verdict(emp: EmployeeAudit):
+    """One line a reader can act on. Plain words on purpose: the people who run this are not auditors."""
     g = emp.allotment_gap
+    labels = {f.label for f in emp.findings}
     if g is None:
         if emp.before.net_pay is None and emp.after.net_pay is None:
-            return 'No statement in the uploaded packs', 'grey'
-        return 'Not reconciled, data missing', 'grey'
+            return 'No payslip found for this employee', 'grey'
+        return 'Could not be checked, a figure is missing', 'grey'
+    if 'The statement shows two different net pay figures' in labels:
+        return 'Not verified: the payslip shows two different take home figures', 'red'
+    if 'The deductions add up to more than the pay' in labels:
+        return 'Not verified: the deductions on the payslip do not add up', 'red'
+    if 'The statement does not add up' in labels:
+        return 'Not verified: the payslip figures do not add up', 'red'
     if abs(g) <= CENT:
-        return 'Engine matches payroll', 'green'
-    if any(f.label == 'Unattributed' for f in emp.findings):
-        return 'Difference not attributed', 'red'
-    if any(f.label == 'Net pay printings disagree' for f in emp.findings):
-        return 'Net pay printings disagree, unverified', 'red'
-    if any(f.label == 'Statement lines cannot all be right' for f in emp.findings):
-        return 'Statement lines cannot all be right, unverified', 'red'
-    if any(f.label == 'Statement identity does not tie' for f in emp.findings):
-        return 'Statement identity does not tie, unverified', 'red'
+        return 'Correct: the employee takes home what was promised', 'green'
+    if 'No cause could be established' in labels:
+        return 'Difference found, cause not established', 'red'
+    side = 'less' if g < 0 else 'more'
     if emp.actual_net_change is not None and emp.actual_net_change < 0:
-        return 'Net pay falls, cause identified', 'yellow'
-    return 'Difference attributed', 'yellow'
+        return (f'Take home pay falls, and it is {_m(abs(g))} a month {side} than promised. See the cause below',
+                'yellow')
+    return f'Takes home {_m(abs(g))} a month {side} than promised. See the cause below', 'yellow'
 
 
 def summarise(audits: list) -> dict:
@@ -482,7 +489,7 @@ def summarise(audits: list) -> dict:
     by_cause = {}
     for a in audits:
         for f in a.findings:
-            if f.label in ('Match', 'Statement not provided'):
+            if f.label in ('Match', 'No payslip found for this employee'):
                 continue
             c = by_cause.setdefault(f.label, {'employees': 0, 'amount': 0.0})
             c['employees'] += 1
