@@ -221,42 +221,50 @@ def _orientation_score(text):
 
 
 def ocr_page(data: bytes, index: int, scale=1.9, hint_box=None):
-    """OCR one page. Scanned packs often contain rotated pages, so read each candidate rotation and keep the best.
-    hint_box is a one-element list holding the angle that won on an earlier page of the same pack; packs are
-    consistently oriented, so trying that angle first usually settles the page on the first pass."""
+    """OCR one page. Scanned packs often contain rotated pages, so the rotation is settled first on a small render,
+    which is cheap, and only the winning angle is then read at full size. hint_box carries the angle that won on an
+    earlier page of the same pack, and a pack is oriented the same way throughout."""
     from PIL import Image
+    angle = hint_box[0] if (hint_box and hint_box[0] is not None) else None
+    if angle is None:
+        angle = _detect_rotation(data, index)
     png = pdf_page_png(data, index, scale=scale)
-    best, best_score, best_angle = '', -1, 0
-    order = [0, 180, 90, 270]
-    if hint_box and hint_box[0] in order:
-        order = [hint_box[0]] + [a for a in order if a != hint_box[0]]
-        trusted = True          # a pack is oriented the same way throughout, so one pass is normally enough
-    else:
-        trusted = False
-    for angle in order:
-        buf = io.BytesIO()
-        with Image.open(io.BytesIO(png)) as im:
-            rot = im if angle == 0 else im.rotate(angle, expand=True)
-            rot.save(buf, 'PNG')
-            if rot is not im:
-                rot.close()
-        try:
-            text = _ocr_once(buf.getvalue())
-        except Exception:
-            continue
-        finally:
-            buf.close()
-        sc = _orientation_score(text)
+    text = _ocr_rotated(png, angle)
+    if _orientation_score(text) < 8:        # the hint did not hold on this page, so settle it on its own
+        angle = _detect_rotation(data, index)
+        text = _ocr_rotated(png, angle)
+    if hint_box is not None and _orientation_score(text) >= 8:
+        hint_box[0] = angle
+    return text
+
+
+def _ocr_rotated(png, angle):
+    from PIL import Image
+    buf = io.BytesIO()
+    with Image.open(io.BytesIO(png)) as im:
+        rot = im if angle == 0 else im.rotate(angle, expand=True)
+        rot.save(buf, 'PNG')
+        if rot is not im:
+            rot.close()
+    try:
+        return _ocr_once(buf.getvalue())
+    except Exception:
+        return ''
+    finally:
+        buf.close()
+
+
+def _detect_rotation(data, index):
+    """Which way up is this page. Read a small render at each rotation and keep the one that reads as words: a
+    quarter-size pass costs a fraction of a full one, so four of them are cheaper than one wrong full pass."""
+    small = pdf_page_png(data, index, scale=0.9)
+    best, best_score = 0, -1
+    for angle in (0, 180, 90, 270):
+        sc = _orientation_score(_ocr_rotated(small, angle))
         if sc > best_score:
-            best, best_score, best_angle = text, sc, angle
-        if best_score >= 24:          # a clean upright statement scores well above this
+            best, best_score = angle, sc
+        if best_score >= 10:
             break
-        if trusted and best_score >= 8:   # readable at the pack's known rotation: do not pay for three more passes
-            break
-    if best_score < 0:
-        raise RuntimeError('no OCR engine available')
-    if hint_box is not None:
-        hint_box[0] = best_angle
     return best
 
 
@@ -370,9 +378,9 @@ def paychecks_from_pdf(data: bytes, hint='', max_pages=200, progress=None, worke
     network, and a pack of eighty statements is otherwise almost all waiting."""
     from concurrent.futures import ThreadPoolExecutor
     if workers is None:
-        # Each page in flight holds a rendered bitmap and a tesseract process. Three at a time fits the 512 MiB
-        # container; the instance was OOM killed at eight.
-        workers = int(os.environ.get('PDF_WORKERS', '3'))
+        # Each page in flight holds a rendered bitmap and a tesseract process. Six at a time suits the 2 CPU, 4 GB
+        # instance; the 512 MiB instance was OOM killed at eight, so keep this in step with the plan.
+        workers = int(os.environ.get('PDF_WORKERS', '6'))
     pages = pdf_pages_text(data) or []
     if not pages:
         try:
@@ -382,6 +390,8 @@ def paychecks_from_pdf(data: bytes, hint='', max_pages=200, progress=None, worke
             pages = []
     pages = pages[:max_pages]
     rot, done = [None], [0]   # filled by the first page that OCRs cleanly, then reused by the rest
+    if progress:
+        progress(0, len(pages))   # say how many pages there are before the first one finishes
 
     def work(arg):
         i, text = arg

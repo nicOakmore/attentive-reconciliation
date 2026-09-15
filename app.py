@@ -90,7 +90,9 @@ def _work(job, census, rep, before, after, client, period):
     t0 = time.time()
     try:
         def progress(done, total):
-            j.update(done=done, total=total, stage=f'reading payroll statements, {done} of {total}')
+            stage = (f'reading payroll statements, {done} of {total}' if done
+                     else f'reading {total} payroll statements')
+            j.update(done=done, total=total, stage=stage)
         audits, summary, notes = builder.run(census_bytes=census[0] if census else None,
                                              report_bytes=rep[0] if rep else None,
                                              before=before, after=after, progress=progress)
