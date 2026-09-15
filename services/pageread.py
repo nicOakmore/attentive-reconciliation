@@ -13,7 +13,7 @@ import io, os, re, math, statistics as stats
 from dataclasses import dataclass, field, asdict
 from typing import Optional, List, Dict
 
-EXTRACTOR_VERSION = '2026.09.15.4'      # bump when the reading changes; the store keys on it
+EXTRACTOR_VERSION = '2026.09.15.5'      # bump when the reading changes; the store keys on it
 
 NUM_RE = re.compile(r'^[\(\-\$]?\s*(?:\d{1,3}(?:,\d{3})+|\d+)?(?:\.\d{1,2})?\s*\)?[-]?$')
 HAS_DIGIT = re.compile(r'\d')

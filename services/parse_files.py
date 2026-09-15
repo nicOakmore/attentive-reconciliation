@@ -711,6 +711,15 @@ def _deposit_total(text):
     return None
 
 
+_GROQ_OPEN = [True]
+
+
+def _groq_open():
+    """Whether the model is still worth asking. One rate limited call closes it for the rest of the run: waiting
+    on a metered key page after page costs minutes and reads nothing the page did not already give."""
+    return _GROQ_OPEN[0]
+
+
 _MODEL_BUDGET = [int(os.environ.get('GROQ_PAGE_BUDGET', '15'))]   # how many pages a single run may send to the model
 _BUDGET_LOCK = threading.Lock()
 
@@ -812,9 +821,15 @@ def _page_record(data, i, text, hint, rot, source_name='', source_sha='', store_
     geo = {k: dict(value=v.value, method=v.method, confidence=v.confidence, note=v.note)
            for k, v in (reading.fields.items() if reading else [])}
     base = parse_text_paycheck(page_text, geometry=geo)
-    need = [k for k in ('name', 'federal', 'net_pay', 'taxable_wages', 'medicare_gross') if base.get(k) is None]
+    # The model is the last resort for a page the reader could not make sense of, not a way to top up a page that
+    # read. Calling it whenever any single figure is missing is what turned a five minute run into eight: the key
+    # is metered, the calls queue behind one another, and a rate limited call waits. So it is asked only when the
+    # page has no identity, or when neither the withholding nor the net pay came out of it.
+    unreadable = ((base.get('name') is None and base.get('employee_id') is None)
+                  or (base.get('federal') is None and base.get('net_pay') is None))
+    need = [k for k in ('name', 'federal', 'net_pay') if base.get(k) is None]
     recs, used_model = [], False
-    if need and _take_model_budget():
+    if unreadable and _groq_open() and _take_model_budget():
         try:
             for r in groq_client.structure_paycheck_text(page_text, hint=hint):
                 cand = dict(name=r.get('employee_name'), employee_id=r.get('employee_id'),
@@ -835,6 +850,8 @@ def _page_record(data, i, text, hint, rot, source_name='', source_sha='', store_
                     merged['source'] = f'page {i+1}, {src_kind}, model filled'
                     recs.append(merged)
         except Exception as e:
+            if 'rate limit' in str(e).lower():
+                _GROQ_OPEN[0] = False      # the key is metered; stop queueing behind it for the rest of the run
             recs.append(dict(**base, source=f'page {i+1}, {src_kind}, model unavailable: {str(e)[:60]}'))
     if not recs and (base.get('name') or base.get('employee_id')):
         base['source'] = f'page {i+1}, {src_kind}' + (', geometry' if geo_fields else '')
@@ -973,6 +990,7 @@ def paychecks_from_pdf(data: bytes, hint='', max_pages=200, progress=None, worke
     pages = pages[:max_pages]
     src_sha = hashlib.sha256(data).hexdigest()
     _MODEL_BUDGET[0] = int(os.environ.get('GROQ_PAGE_BUDGET', '15'))
+    _GROQ_OPEN[0] = True
     rot, done = [None], [0]   # filled by the first page that OCRs cleanly, then reused by the rest
     if progress:
         progress(0, len(pages))   # say how many pages there are before the first one finishes
