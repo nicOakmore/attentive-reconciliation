@@ -175,6 +175,28 @@ def pdf_pages_text(data: bytes):
 _VISION_LOCK = threading.Lock()
 
 
+def ocr_selftest():
+    """What the container can actually do: which engine, which version, and how long one page takes."""
+    import time
+    out = {}
+    try:
+        import pytesseract
+        out['tesseract_version'] = str(pytesseract.get_tesseract_version())
+    except Exception as e:
+        out['tesseract_version'] = f'unavailable: {type(e).__name__}: {e}'
+    try:
+        from PIL import Image, ImageDraw
+        im = Image.new('L', (700, 120), 'white')
+        ImageDraw.Draw(im).text((10, 40), 'FEDERAL W/H 549.35 NET PAY 5141.43', fill=0)
+        buf = io.BytesIO(); im.save(buf, 'PNG')
+        t = time.time()
+        out['sample_text'] = (_ocr_once(buf.getvalue()) or '').strip()[:80]
+        out['sample_seconds'] = round(time.time() - t, 2)
+    except Exception as e:
+        out['sample_text'] = f'failed: {type(e).__name__}: {e}'
+    return out
+
+
 def _ocr_once(png):
     try:
         import pytesseract
@@ -334,6 +356,8 @@ def _page_record(data, i, text, hint, rot):
             page_text, src_kind = ocr_page(data, i, hint_box=rot), 'OCR'
         except Exception as e:
             return [dict(name=None, source=f'page {i+1}, unreadable: {str(e)[:70]}')]
+    if len((page_text or '').strip()) < 40:
+        return [dict(name=None, source=f'page {i+1}, no text recovered from the page')]
     base = parse_text_paycheck(page_text)
     need = [k for k in ('name', 'federal', 'net_pay', 'taxable_wages', 'medicare_gross') if base.get(k) is None]
     used_model = False

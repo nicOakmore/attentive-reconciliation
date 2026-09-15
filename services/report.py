@@ -168,9 +168,12 @@ def employee_block(doc, a, client=''):
                 _p(doc, f"Engine taxable income before of {money(a.engine.taxable_income_before)} differs from payroll "
                         f"taxable wages of {money(round((a.before.taxable_wages or 0) * a.pay_periods / 12, 2))} by {money(gap)}.")
     _keep(_p(doc, 'Cause', size=9.5, bold=True, color=NAVY, space_after=2))
-    named = [f for f in a.findings if f.label not in ('Match', 'Unattributed')]
+    named = [f for f in a.findings if f.label not in ('Match', 'Unattributed', 'Statement not provided')]
     if a.verdict_class == 'green':
         _p(doc, 'No discrepancy identified. The engine allotment equals the actual net pay change.')
+    elif any(f.label == 'Statement not provided' for f in a.findings):
+        _p(doc, 'No payroll statement in the packs supplied matched this employee, so the engine figures stand '
+                'unreconciled. This is a coverage limit of the files, not a discrepancy.')
     elif not named:
         _p(doc, f"The submitted data establishes a difference of {money(a.allotment_gap)} and does not establish its cause.")
     else:

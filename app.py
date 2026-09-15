@@ -155,6 +155,14 @@ def download(job):
                      mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document')
 
 
+@app.get('/diag')
+def diag():
+    from services import parse_files as P
+    return jsonify(ocr=P.ocr_selftest(), workers=os.environ.get('PDF_WORKERS', '6'),
+                   jobs={k: dict(state=v.get('state'), stage=v.get('stage'), done=v.get('done'),
+                                 total=v.get('total')) for k, v in JOBS.items()})
+
+
 @app.get('/healthz')
 def healthz():
     ok, model = groq_client.health()
