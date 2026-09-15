@@ -297,11 +297,16 @@ def build(audits, summary, notes, client='', files=None, ai_paragraph='', period
                [[k, v['employees'], money(v['amount'])] for k, v in summary['causes']], [4.2, 1.4, 1.3])
         _p(doc, '', space_after=8)
     if summary.get('total_gap') is not None:
-        _p(doc, f"The aggregate difference between engine allotment and actual net pay change is "
-                f"{money(summary['total_gap'])} a month across the {summary['covered']} employees the submitted "
-                f"statements reconcile, in a population of {summary['employees']}. "
-                f"{summary['decreases']} employees show lower reported net pay on the statement after the premium "
-                f"than on the statement before it.", space_after=8)
+        unver = summary.get('unverified', 0)
+        _p(doc, f"The aggregate difference between engine allotment and reported net pay change is "
+                f"{money(summary['total_gap'])} a month. It is calculated over the {summary['covered']} employees "
+                f"who carry an accepted net pay on both statements and an allotment in the proposal report, in a "
+                f"population of {summary['employees']}"
+                + (f", and {unver} of those {summary['covered']} carry an untied statement identity and are "
+                   f"reported unverified; their figures are included in this total and should be read with that "
+                   f"qualification." if unver else '.')
+                + f" {summary['decreases']} employees show lower reported net pay on the statement after the "
+                  f"premium than on the statement before it.", space_after=8)
     _p(doc, 'Scope and method', size=12, bold=True, color=NAVY, space_after=4)
     for n in (files or []) + notes:
         _p(doc, n, size=9, color=GREY, space_after=2)
@@ -325,6 +330,11 @@ def build(audits, summary, notes, client='', files=None, ai_paragraph='', period
     _p(doc, 'Statements are matched to employees by payroll employee number first, then by last name with the first '
             'three letters of the first name. A statement that matches no employee in the population is excluded and '
             'counted above; it is never assigned to an employee on a partial match.', size=9, color=GREY, space_after=8)
+    _p(doc, 'The statements print the employee\'s filing status, multiple jobs indicator, children under 17, other '
+            'dependents, other income, other deductions and additional withholding, and these are compared with the '
+            'census. The statements reviewed do not print an exemption from withholding indicator. Accordingly this '
+            'review does not compare or conclude on that W-4 field; its presence or value is outside the available '
+            'statement evidence.', size=9, color=GREY, space_after=8)
     _p(doc, 'Reading the statements', size=12, bold=True, color=NAVY, space_after=4)
     _p(doc, 'The statements in these packs are scanned images, so every figure is read by optical character '
             'recognition and then located by its printed label. Net pay appears four times on the same statement: '

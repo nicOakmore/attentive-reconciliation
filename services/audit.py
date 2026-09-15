@@ -344,7 +344,9 @@ def summarise(audits: list) -> dict:
     both = sum(1 for a in audits if a.before.net_pay is not None and a.after.net_pay is not None)
     one = sum(1 for a in audits if (a.before.net_pay is None) != (a.after.net_pay is None))
     none = n - both - one
-    return dict(covered=len(covered), population=dict(both=both, one=one, none=none, unmatched_statements=0),
+    unverified = [a for a in covered if a.verdict_class == 'red']
+    return dict(covered=len(covered), unverified=len(unverified),
+                population=dict(both=both, one=one, none=none, unmatched_statements=0),
                 employees=n, matched=len(matched), attributed=len(attributed), unexplained=len(unexplained),
                 data_missing=len(missing), total_gap=r2(sum(gaps)) if gaps else None,
                 decreases=len([a for a in audits if (a.actual_net_change or 0) < 0]),
