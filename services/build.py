@@ -36,8 +36,9 @@ def run(census_bytes=None, report_bytes=None, before=None, after=None, before_na
             notes.append(f'{label}: {len(recs)} rows from spreadsheet {fname}')
         else:
             recs = P.paychecks_from_pdf(data, hint=label, progress=progress)
-            vision = sum(1 for r in recs if 'model' in (r.get('source') or ''))
-            notes.append(f'{label}: {len(recs)} statements from {fname}, {vision} read by the model')
+            modelled = sum(1 for r in recs if 'model' in (r.get('source') or ''))
+            notes.append(f'{label}: {len(recs)} statements read from {fname}'
+                         + (f', of which {modelled} needed the model to locate a line' if modelled else ''))
         return recs
 
     before_recs, after_recs = payroll(before, 'Payroll before'), payroll(after, 'Payroll after')
@@ -97,8 +98,10 @@ def run(census_bytes=None, report_bytes=None, before=None, after=None, before_na
     orphan_b = [r for r in before_recs if r.get('source') not in used]
     orphan_a = [r for r in after_recs if r.get('source') not in used]
     if orphan_b or orphan_a:
-        notes.append(f'{len(orphan_b)} before and {len(orphan_a)} after statements did not match any employee in the '
-                     f'report or census and were not used')
-    matched_both = sum(1 for a in audits if a.before.federal is not None and a.after.federal is not None)
-    notes.append(f'{matched_both} of {len(audits)} employees have both statements')
-    return audits, summarise(audits), notes
+        notes.append(f'{len(orphan_b)} before and {len(orphan_a)} after statements were read but matched no employee '
+                     f'in the proposal report or census, and were excluded from the reconciliation')
+    matched_both = sum(1 for a in audits if a.before.net_pay is not None and a.after.net_pay is not None)
+    notes.append(f'{matched_both} of {len(audits)} employees were matched to both a before and an after statement')
+    summary = summarise(audits)
+    summary['population']['unmatched_statements'] = len(orphan_b) + len(orphan_a)
+    return audits, summary, notes

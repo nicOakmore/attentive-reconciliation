@@ -226,20 +226,32 @@ def _resolution(a):
     if a.verdict_class == 'green':
         return 'No data correction required. The engine and the payroll reconcile to the cent.'
     for f in a.findings:
-        if f.label == 'Retirement deduction not in the census':
+        if f.label in ('Retirement deduction not in the census', 'Federal taxable wage reduction not in the census'):
             base = (a.census.pretax_other or 0)
-            return (f"Add {money(f.amount)} to census field Q, giving {money(round(base + (f.amount or 0), 2))}, "
-                    f"and rerun the calculation.")
+            return (f"Resolution candidate: verify {money(f.amount)} a month against the census input specification. "
+                    f"If field Q is the designated input for it, the field becomes "
+                    f"{money(round(base + (f.amount or 0), 2))}; rerun the calculation and compare again.")
         if f.label == 'Cafeteria deduction not in the census':
-            return f"Add the missing pre-tax deduction of {money(f.amount)} to the census and rerun the calculation."
+            return (f"Resolution candidate: verify the pre-tax deduction of {money(f.amount)} against the census "
+                    f"input specification, add it to the designated field and rerun the calculation.")
+        if f.label == 'W-4 withholding instruction':
+            return ('Resolution candidate: reconcile the W-4 held by payroll with the W-4 data on the census, then '
+                    'rerun the calculation on the agreed instruction.')
     labels = {f.label for f in a.findings}
+    if 'Statement identity does not tie' in labels:
+        return ('No correction is supported. The statement lines do not reconcile to the net pay change, so this '
+                'employee is reported unverified pending a manual check of the statement.')
+    if 'Other changed earning or deduction' in labels:
+        return ('No census correction applies. Something other than the premium changed between the two statements, '
+                'so the pair is not a like for like comparison. Obtain a mock statement that changes only the premium.')
     if 'Fixed federal withholding' in labels:
         return 'No data correction available. Payroll withholds a fixed federal amount for this employee.'
-    if labels & {'Federal withholding tables', 'State withholding'}:
-        return 'No census correction applies. The difference is a withholding table configuration difference.'
+    if labels & {'Withholding method or configuration difference', 'State withholding'}:
+        return ('No census correction applies. The difference arises from the withholding parameters each system '
+                'holds, not from the census input.')
     if 'Unattributed' in labels:
-        return 'The discrepancy is documented. No corrective action is supported by the submitted data.'
-    return 'The discrepancy is documented.'
+        return 'The difference is documented. No corrective action is supported by the submitted data.'
+    return 'The difference is documented.'
 
 
 def build(audits, summary, notes, client='', files=None, ai_paragraph='', period=''):
@@ -262,6 +274,8 @@ def build(audits, summary, notes, client='', files=None, ai_paragraph='', period
     _p(doc, '', space_after=8)
     if summary['causes']:
         _p(doc, 'Causes', size=12, bold=True, color=NAVY, space_after=4)
+        _p(doc, 'Cause counts are not mutually exclusive. An employee may carry more than one cause, so these counts '
+                'do not sum to the population.', size=8.5, color=GREY, space_after=4)
         _table(doc, ['Cause', 'Employees', 'Amount, monthly'],
                [[k, v['employees'], money(v['amount'])] for k, v in summary['causes']], [4.2, 1.4, 1.3])
         _p(doc, '', space_after=8)
@@ -272,10 +286,36 @@ def build(audits, summary, notes, client='', files=None, ai_paragraph='', period
     _p(doc, 'Scope and method', size=12, bold=True, color=NAVY, space_after=4)
     for n in (files or []) + notes:
         _p(doc, n, size=9, color=GREY, space_after=2)
-    _p(doc, 'Census fields are the engine inputs. The payroll before the premium is the baseline and the payroll after it '
-            'is the comparison. Savings are the withholding before minus the withholding after. The employee allotment '
-            'comes from the proposal report. Net pay is reconciled independently. A cause is reported only where the '
-            'submitted data establishes it.', size=9, color=GREY, space_after=14)
+    _p(doc, 'Census fields are the engine inputs. The payroll before the premium is the baseline and the payroll after '
+            'it is the comparison. Payroll federal withholding savings are the federal withholding on the before '
+            'statement less the federal withholding on the after statement, converted to the report period by the '
+            'pay frequency carried on the census. The employee allotment comes from the proposal report. Net pay is '
+            'reconciled independently of the tax lines. A cause is reported only where the submitted data '
+            'establishes it, and an employee the data does not settle is reported unverified rather than assigned a '
+            'reconciliation.', size=9, color=GREY, space_after=8)
+    _p(doc, 'Population and matching', size=12, bold=True, color=NAVY, space_after=4)
+    pop = summary.get('population') or {}
+    _table(doc, ['Control', 'Count'],
+           [['Employees in the proposal report and census, the defined population', summary['employees']],
+            ['Matched to both a before and an after statement', pop.get('both', 0)],
+            ['Matched to one statement only', pop.get('one', 0)],
+            ['Matched to no statement', pop.get('none', 0)],
+            ['Statements in the packs not matched to any employee, excluded', pop.get('unmatched_statements', 0)]],
+           [5.2, 1.7])
+    _p(doc, '', space_after=4)
+    _p(doc, 'Statements are matched to employees by payroll employee number first, then by last name with the first '
+            'three letters of the first name. A statement that matches no employee in the population is excluded and '
+            'counted above; it is never assigned to an employee on a partial match.', size=9, color=GREY, space_after=8)
+    _p(doc, 'Reading the statements', size=12, bold=True, color=NAVY, space_after=4)
+    _p(doc, 'The statements in these packs are scanned images, so every figure is read by optical character '
+            'recognition and then located by its printed label. Net pay appears four times on the same statement: '
+            'the net pay line, the direct deposit total, the sum of the individual deposit rows, and gross pay less '
+            'total deductions. These are four representations of one document, not four independent sources. Where '
+            'at least two of them agree, the agreed figure is used, as an extraction control; where no two agree, no '
+            'net pay is inferred and the employee is reported unverified. The control establishes that the figure '
+            'was read correctly, not that the payroll statement itself is correct. Every figure the tool takes from '
+            'anywhere other than its own printed line is recorded against that employee in the run notes.',
+         size=9, color=GREY, space_after=14)
     for a in audits:
         employee_block(doc, a, client=client)
     buf = io.BytesIO(); doc.save(buf); buf.seek(0)

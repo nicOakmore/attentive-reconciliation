@@ -504,31 +504,31 @@ def parse_text_paycheck(text):
     m = re.search(r'emp(?:loyee)?\s*(?:nbr|no|#|id)[:.]?\s*\|?\s*(\w{2,12})', text, re.I)
     if m:
         out['employee_id'] = m.group(1)
+    out.update(_w4_from_statement(text))
+    # Whether the wage reduction is retirement is a question for the printed line, not for the arithmetic.
+    if re.search(r'trs\s*salary\s*red|403\s*\(?b|457\b|retirement', text, re.I):
+        out['retirement_line'] = True
     # Net pay is printed three times over: on its own line, as the direct deposit total, and as gross less total
     # deductions. Take the value two of them agree on. Failing that, trust the deposit block, which stands on its
     # own and is not read across the deduction columns beside it.
-    plaus = lambda v: v is not None and out.get('gross') and 0.25 * out['gross'] <= v <= out['gross']
     line_v = out.get('net_pay')
     dep = _deposit_total(text)
     derived = (r2(out['gross'] - out['total_deductions'])
                if out.get('gross') is not None and out.get('total_deductions') is not None else None)
-    cands = [('line', line_v), ('deposit', dep), ('gross less deductions', derived)]
+    rows = _deposit_rows(text)
+    row_sum = r2(sum(rows)) if rows else None
+    cands = [('line', line_v), ('deposit total', dep), ('gross less total deductions', derived),
+             ('sum of the deposit rows', row_sum)]
     cands = [(k, v) for k, v in cands if v is not None]
     agreed = next((v for i, (_, v) in enumerate(cands)
                    if any(abs(v - w) <= 0.02 for j, (_, w) in enumerate(cands) if j != i)), None)
-    pick, why = None, None
     if agreed is not None:
-        pick, why = agreed, None
-    elif plaus(dep):
-        pick, why = dep, 'taken from the direct deposit total'
-    elif plaus(line_v):
-        pick = line_v
-    if pick is not None:
-        if line_v is not None and abs(line_v - pick) > 0.02:
-            out['net_pay_corrected'] = (f"net pay read as {line_v:.2f} does not hold against the other printings, "
-                                        f"{why or 'taken as'} {pick:.2f}")
-        out['net_pay'] = pick
+        if line_v is not None and abs(line_v - agreed) > 0.02:
+            out['net_pay_corrected'] = (f"net pay read as {line_v:.2f} does not agree with the other printings of the "
+                                        f"same figure, read as {agreed:.2f}")
+        out['net_pay'] = agreed
     elif len(cands) > 1:
+        # No two printings agree, so no value is inferred: the employee is reported unverified instead.
         out['net_pay_unreliable'] = [v for _, v in cands]
         out['net_pay'] = None
     fed = _federal_from_deductions(out)
@@ -547,6 +547,25 @@ def parse_text_paycheck(text):
     return out
 
 
+def _w4_from_statement(text):
+    """What the statement itself prints about the employee's W-4, so a withholding instruction can be compared with
+    the census rather than inferred from a gap."""
+    out = {}
+    m = re.search(r'w-?4\s*filing\s*status\s*:?\s*\|?\s*([shmj])', text, re.I)
+    if m:
+        out['w4_status'] = m.group(1).upper()
+    m = re.search(r'w-?4\s*mult[il1]-?\s*job\s*:?\s*\|?\s*([yn])', text, re.I)
+    if m:
+        out['w4_multijob'] = m.group(1).upper()
+    m = re.search(r'w-?4\s*nbr\s*ch[il1]{1,2}dren\s*under\s*17\s*:?\s*\|?\s*(\d{1,2})', text, re.I)
+    if m:
+        out['w4_children'] = int(m.group(1))
+    m = re.search(r'add[a-z]{0,2}\s*w[il1]?thho[il1]d[il1]ng\s*:?\s*\|?\s*([\d,.]+)', text, re.I)
+    if m:
+        out['w4_extra'] = num(m.group(1))
+    return out
+
+
 def _federal_from_deductions(out):
     """The statement prints every deduction and their total, so federal withholding is the total less the rest.
     That arithmetic is printed on the page, which makes it a check on the scan rather than an assumption."""
@@ -558,6 +577,25 @@ def _federal_from_deductions(out):
         return None
     v = r2(total - sum(x or 0 for x in parts))
     return v if -0.01 <= v <= total else None
+
+
+def _deposit_rows(text):
+    """The amounts on the individual bank rows of the deposit block. They sum to the deposit total, which makes the
+    total checkable against its own line items rather than against a derived figure."""
+    lines = text.split('\n')
+    start = next((i for i, l in enumerate(lines) if re.search(r'account\s*(number|type)', l, re.I)), None)
+    if start is None:
+        return []
+    out = []
+    for l in lines[start + 1:start + 10]:
+        if re.search(r'^\s*-?\s*total\s*:?', l, re.I):
+            break
+        if re.search(r'checking|savings|account|bank|\(\d{3}\)', l, re.I):
+            vals = [num(m.group(0)) for m in NUM.finditer(l)]
+            vals = [v for v in vals if v and v > 1]
+            if vals:
+                out.append(vals[-1])          # the amount column sits at the end of the row
+    return out
 
 
 def _deposit_total(text):
@@ -726,7 +764,12 @@ def anchor_and_solve(rec, gross_anchor=None):
             rec['gross'] = round(gross_anchor, 2)
             g = rec['gross']
     td = num(rec.get('total_deductions'))
-    if g and td is not None and 0 < td < g:
+    if rec.get('net_pay_unreliable'):
+        # The three printings of net pay disagreed, so nothing here may stand in for the figure: the employee is
+        # reported unverified instead of reconciled against a derived number.
+        notes.append('net pay printings disagreed (' + ', '.join(f'{v:.2f}' for v in rec['net_pay_unreliable'])
+                     + '); no net pay taken')
+    elif g and td is not None and 0 < td < g:
         implied_net = round(g - td, 2)
         if net is None or not (g * 0.25 <= net <= g):
             notes.append(f'net pay {net} replaced with {implied_net}, gross minus the printed total deductions')
@@ -781,6 +824,9 @@ def to_paycheck(rec) -> Paycheck:
                     reimbursement=g('reimbursement'), fee=g('fee'), product=g('product'), retirement=g('retirement'),
                     cafeteria=g('cafeteria'), other_deductions=g('other_deductions'), source=rec.get('source', ''))
     pc.federal_unreliable = rec.get('federal_unreliable')
+    for k in ('w4_status', 'w4_multijob', 'w4_children', 'w4_extra', 'retirement_line', 'other_total',
+              'total_deductions', 'net_pay_corrected', 'net_pay_unreliable'):
+        setattr(pc, k, rec.get(k))
     return pc
 
 
