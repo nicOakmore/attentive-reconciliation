@@ -158,7 +158,20 @@ def download(job):
 @app.get('/diag')
 def diag():
     from services import parse_files as P
-    return jsonify(ocr=P.ocr_selftest(), workers=os.environ.get('PDF_WORKERS', '6'),
+    timing = None
+    src = request.args.get('pdf')
+    if src:
+        import time
+        data = open(src, 'rb').read()
+        idx = int(request.args.get('page', '0'))
+        timing = {}
+        t = time.time(); png = P.pdf_page_png(data, idx, scale=1.9); timing['render_full'] = round(time.time() - t, 2)
+        timing['png_bytes'] = len(png)
+        t = time.time(); ang = P._detect_rotation(data, idx); timing['detect_rotation'] = round(time.time() - t, 2)
+        timing['angle'] = ang
+        t = time.time(); txt = P._ocr_rotated(png, ang); timing['ocr_full_page'] = round(time.time() - t, 2)
+        timing['chars'] = len((txt or '').strip())
+    return jsonify(ocr=P.ocr_selftest(), timing=timing, workers=os.environ.get('PDF_WORKERS', '6'),
                    jobs={k: dict(state=v.get('state'), stage=v.get('stage'), done=v.get('done'),
                                  total=v.get('total')) for k, v in JOBS.items()})
 
