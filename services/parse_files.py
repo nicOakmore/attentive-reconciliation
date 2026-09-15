@@ -143,13 +143,13 @@ def _direct(want, headers):
 # ---------------------------------------------------------------- payroll PDFs
 LINE_PATTERNS = {
  'gross': [r'standard gross', r'^gross$', r'total gross', r'^gross pay'],
- 'federal': [r'withholding tax', r'federal (income )?tax', r'fitwh', r'fed (w/?h|tax)'],
+ 'federal': [r'w\w{0,6}holding tax', r'federal (income )?tax', r'fitwh', r'fed (w/?h|tax)'],
  'state': [r'^state (income )?tax', r'\bmo\b', r'\bco\b', r'state w/?h'],
  'social_security': [r'fica tax', r'social security', r'^soc$', r'\bsoc\b', r'oasdi'],
  'medicare': [r'medicare tax', r'^med$', r'\bmed\b'],
  'taxable_wages': [r'taxable wages'],
  'medicare_gross': [r'medicare gross'],
- 'net_pay': [r'net pay'],
+ 'net_pay': [r'n[eo0]t\s*pay', r'net\s*chec?k'],   # OCR reads Net Pay as Not Pay on scanned packs
  'retirement': [r'trs salary red', r'403\(?b\)?', r'457', r'retirement'],
  'premium': [r'pcm pretax', r'pcmpt', r'pcmp pre tax', r'premium'],
  'reimbursement': [r'simrp'],
@@ -355,14 +355,53 @@ def parse_text_paycheck(text):
             if v is not None:
                 out.setdefault(field, v)
                 break
-    for pat in (r'employee name:?\s*\|?\s*([A-Z][A-Za-z ,.\'-]{3,40})', r'^([A-Z]{2,}, [A-Z][A-Za-z ,.\'-]{2,40})$'):
-        m = re.search(pat, text, re.M)
+    for pat in (r'employee\s*name\s*:?\s*\|?\s*([^|\n]{3,60})',
+                r'^([A-Z][A-Z\'-]+(?: [A-Z]{2,})?, [A-Z][A-Za-z ,.\'-]{2,40})$'):
+        m = re.search(pat, text, re.I | re.M)
         if m:
-            out['name'] = m.group(1).strip(); break
+            nm = m.group(1).strip().rstrip(':,').strip()
+            if nm and not nm.lower().startswith(('pay campus', 'campus')):
+                out['name'] = nm
+                break
     m = re.search(r'emp(?:loyee)?\s*(?:nbr|no|#|id)[:.]?\s*\|?\s*(\w{2,12})', text, re.I)
     if m:
         out['employee_id'] = m.group(1)
+    if out.get('net_pay') is None:
+        out['net_pay'] = _deposit_total(text)
+    if out.get('taxable_wages') is None and out.get('medicare_gross') is not None and out.get('retirement'):
+        # A retirement reduction lowers federal taxable wages and leaves Medicare wages alone, so the taxable wages
+        # line can be recovered when the scan loses it.
+        out['taxable_wages'] = r2(out['medicare_gross'] - out['retirement'])
+        out['taxable_wages_derived'] = True
     return out
+
+
+def _deposit_total(text):
+    """The direct deposit block ends in a total, and that total is the net pay. Used when the printed net pay line
+    itself did not survive the scan."""
+    lines = text.split('\n')
+    start = next((i for i, l in enumerate(lines) if re.search(r'account (number|type)', l, re.I)), None)
+    if start is None:
+        return None
+    for l in lines[start + 1:start + 12]:
+        m = re.search(r'^\s*-?\s*total\s*:?', l, re.I)
+        if m:
+            v = _amount_for(l, m)
+            if v:
+                return v
+    return None
+
+
+_MODEL_BUDGET = [int(os.environ.get('GROQ_PAGE_BUDGET', '15'))]   # how many pages a single run may send to the model
+_BUDGET_LOCK = threading.Lock()
+
+
+def _take_model_budget():
+    with _BUDGET_LOCK:
+        if _MODEL_BUDGET[0] <= 0:
+            return False
+        _MODEL_BUDGET[0] -= 1
+        return True
 
 
 def _page_record(data, i, text, hint, rot):
@@ -380,7 +419,7 @@ def _page_record(data, i, text, hint, rot):
     base = parse_text_paycheck(page_text)
     need = [k for k in ('name', 'federal', 'net_pay', 'taxable_wages', 'medicare_gross') if base.get(k) is None]
     used_model = False
-    if need:
+    if need and _take_model_budget():
         for attempt in (1, 2):
             try:
                 for r in groq_client.structure_paycheck_text(page_text, hint=hint):
@@ -407,6 +446,10 @@ def _page_record(data, i, text, hint, rot):
             except Exception as e:
                 if attempt == 2:
                     recs.append(dict(**base, source=f'page {i+1}, {src_kind}, model unavailable: {str(e)[:60]}'))
+    if need and not used_model and (base.get('name') or base.get('employee_id')):
+        base['source'] = f'page {i+1}, {src_kind}, read by label only'
+        base['fee_from_statement'] = base.get('fee') is not None
+        return [base]
     if not used_model and (base.get('name') or base.get('employee_id')):
         base['source'] = f'page {i+1}, {src_kind}'
         base['fee_from_statement'] = base.get('fee') is not None
@@ -432,6 +475,7 @@ def paychecks_from_pdf(data: bytes, hint='', max_pages=200, progress=None, worke
         except Exception:
             pages = []
     pages = pages[:max_pages]
+    _MODEL_BUDGET[0] = int(os.environ.get('GROQ_PAGE_BUDGET', '15'))
     rot, done = [None], [0]   # filled by the first page that OCRs cleanly, then reused by the rest
     if progress:
         progress(0, len(pages))   # say how many pages there are before the first one finishes

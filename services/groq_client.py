@@ -1,11 +1,15 @@
 """Groq calls. Two jobs only: read files the parser cannot read deterministically, and map unknown column headers.
 The model never computes a saving, never states a cause and never sees the report text.
 """
-import os, json, base64, re, time
+import os, json, base64, re, time, threading
 import requests
 
 API = 'https://api.groq.com/openai/v1/chat/completions'
 TEXT_MODEL = os.environ.get('GROQ_TEXT_MODEL', 'openai/gpt-oss-120b')
+# The key is metered in tokens per minute, and one statement is a few thousand tokens. Several pages in flight just
+# collect 429s whose Retry-After runs into minutes, so calls are queued one at a time and never waited on for long.
+_SEM = threading.Semaphore(int(os.environ.get('GROQ_CONCURRENCY', '1')))
+MAX_WAIT = float(os.environ.get('GROQ_MAX_WAIT', '25'))
 
 
 class GroqUnavailable(RuntimeError):
@@ -19,19 +23,28 @@ def _key():
     return k
 
 
-def _post(payload, tries=3):
+def _post(payload, tries=2):
     last = None
-    for i in range(tries):
-        try:
-            r = requests.post(API, headers={'Authorization': f'Bearer {_key()}', 'Content-Type': 'application/json'},
-                              data=json.dumps(payload), timeout=120)
-            if r.status_code == 429:
-                time.sleep(2 + 3 * i); last = r.text[:200]; continue
-            if r.status_code >= 400:
-                raise GroqUnavailable(f'Groq {r.status_code}: {r.text[:300]}')
-            return r.json()['choices'][0]['message']['content']
-        except requests.RequestException as e:
-            last = str(e); time.sleep(1 + i)
+    with _SEM:
+        for i in range(tries):
+            try:
+                r = requests.post(API, headers={'Authorization': f'Bearer {_key()}', 'Content-Type': 'application/json'},
+                                  data=json.dumps(payload), timeout=60)
+                if r.status_code == 429:
+                    wait = float(r.headers.get('retry-after') or 0) or (2 + 3 * i)
+                    last = f'rate limited, retry after {wait:.0f}s'
+                    if wait > MAX_WAIT or i == tries - 1:
+                        raise GroqUnavailable(f'Groq rate limit: {last}')
+                    time.sleep(wait)
+                    continue
+                if r.status_code >= 400:
+                    raise GroqUnavailable(f'Groq {r.status_code}: {r.text[:300]}')
+                return r.json()['choices'][0]['message']['content']
+            except requests.RequestException as e:
+                last = str(e)
+                if i == tries - 1:
+                    break
+                time.sleep(1 + i)
     raise GroqUnavailable(f'Groq unreachable: {last}')
 
 
@@ -75,10 +88,23 @@ def structure_paycheck_text(text, hint=''):
         'only if the statement itself prints a total, otherwise null; premium_pretax is a pre-tax wellness or PCM '
         'premium line; employee_fee_aftertax is an after-tax administration fee line such as PCM Aftertax; '
         'product_sold is a post-tax product line such as SIA.'
-        + (f' Context: {hint}.' if hint else '') + '\n\nSTATEMENT TEXT:\n' + text[:12000])
+        + (f' Context: {hint}.' if hint else '') + '\n\nSTATEMENT TEXT:\n' + _tighten(text))
     data = _json_from(_post(dict(model=TEXT_MODEL, temperature=0, max_tokens=2000,
                                  messages=[{'role': 'user', 'content': instruction}])))
     return data if isinstance(data, list) else [data]
+
+
+def _tighten(text, limit=5000):
+    """Send the model the lines that carry a label and an amount, not the leave balances and the bank block. Fewer
+    tokens per page is what keeps a pack inside the key's per-minute budget."""
+    keep = []
+    for line in (text or '').split('\n'):
+        if re.search(r'\d', line) and re.search(r'[A-Za-z]{3}', line):
+            keep.append(line.strip())
+        elif re.search(r'employee name|emp nbr|filing status', line, re.I):
+            keep.append(line.strip())
+    out = '\n'.join(keep)
+    return out[:limit] if out else (text or '')[:limit]
 
 
 def summary_paragraph(facts):
