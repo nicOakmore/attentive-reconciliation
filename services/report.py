@@ -66,17 +66,17 @@ def _census_sentence(a):
     c, b = a.census, a.before
     bits = []
     if c.group_health:
-        bits.append(f"census field O contains {money(c.group_health)} for group health")
+        bits.append(f"{money(c.group_health)} for group health in field O")
     if c.pretax_other:
-        bits.append(f"census field Q contains {money(c.pretax_other)}")
+        bits.append(f"{money(c.pretax_other)} of other pre-tax deductions in field Q")
     if c.retirement_401k:
-        bits.append(f"census field R contains {money(c.retirement_401k)} for retirement")
-    s = ('The engine received no pre-tax deduction from the census.' if not bits else
-         f"On the census, {', '.join(bits)}. The engine receives {money(a.census_pretax)} as the total pre-tax "
-         f"deduction.")
+        bits.append(f"{money(c.retirement_401k)} for retirement in field R")
+    s = ('The census gave the proposal no pre-tax deductions at all.' if not bits else
+         f"The census shows {', '.join(bits)}, so the proposal worked with "
+         f"{money(a.census_pretax)} a month of pre-tax deductions.")
     if a.retirement_not_in_census and abs(a.retirement_not_in_census) > 0.02:
-        s += (f" The payroll reduces federal taxable wages by a further {money(a.retirement_not_in_census)} each month "
-              f"for retirement, and no census field carries it.")
+        s += (f" The payslip takes off a further {money(a.retirement_not_in_census)} a month before federal tax "
+              f"which the census does not show, so the proposal worked from a higher income than payroll taxes.")
     return s
 
 
@@ -104,18 +104,22 @@ def _paycheck_rows(a):
 def _arithmetic(doc, a):
     b, af = a.before, a.after
     if b.federal is not None and af.federal is not None:
-        _p(doc, f"Federal withholding savings are {money(b.federal)} minus {money(af.federal)} = "
-                f"{money(round(b.federal - af.federal, 2))} per pay, {money(a.payroll_federal_savings)} a month.")
+        _p(doc, f"Federal tax saved: {money(b.federal)} before the premium, {money(af.federal)} after, so "
+                f"{money(round(b.federal - af.federal, 2))} a pay period and "
+                f"{money(a.payroll_federal_savings)} a month.")
     if b.net_pay is not None and af.net_pay is not None:
-        _p(doc, f"Net pay change is {money(af.net_pay)} minus {money(b.net_pay)} = "
-                f"{money(round(af.net_pay - b.net_pay, 2))} per pay, {money(a.actual_net_change)} a month.")
+        _p(doc, f"Take home pay: {money(b.net_pay)} before, {money(af.net_pay)} after, a change of "
+                f"{money(round(af.net_pay - b.net_pay, 2))} a pay period and {money(a.actual_net_change)} a month.")
     parts = []
-    if a.payroll_federal_savings is not None: parts.append(f"federal savings of {money(a.payroll_federal_savings)}")
-    if a.payroll_state_savings: parts.append(f"state savings of {money(a.payroll_state_savings)}")
-    if a.payroll_fica_savings: parts.append(f"Social Security and Medicare savings of {money(a.payroll_fica_savings)}")
+    if a.payroll_federal_savings is not None: parts.append(f"{money(a.payroll_federal_savings)} of federal tax")
+    if a.payroll_state_savings: parts.append(f"{money(a.payroll_state_savings)} of state tax")
+    if a.payroll_fica_savings: parts.append(f"{money(a.payroll_fica_savings)} of Social Security and Medicare")
     if parts and a.payroll_fee is not None:
-        _p(doc, f"Monthly net pay change is {' plus '.join(parts)} minus the {money(a.payroll_fee)} employee fee = "
-                f"{money(a.expected_net_change)}.")
+        outcome = (f"{money(a.expected_net_change)} a month more in their pay"
+                   if (a.expected_net_change or 0) >= 0 else
+                   f"them {money(abs(a.expected_net_change))} a month worse off")
+        _p(doc, f"Putting that together: the employee saves {' and '.join(parts)} a month and pays the "
+                f"{money(a.payroll_fee)} fee, which should leave {outcome}.")
 
 
 def _recon_rows(a):
@@ -123,18 +127,20 @@ def _recon_rows(a):
     m = lambda v: None if v is None else round(v * pp / 12.0, 2)
     rows = []
     for label, eng, pay in [
-        ('Taxable income before', e.taxable_income_before, m(b.taxable_wages)),
-        ('Taxable income after', e.taxable_income_after, m(af.taxable_wages)),
-        ('Medicare gross before', e.taxable_income_before, m(b.medicare_gross)),
-        ('Federal withholding before', e.federal_before, m(b.federal)),
-        ('Federal savings', e.federal_savings, a.payroll_federal_savings),
-        ('State savings', e.state_savings, a.payroll_state_savings),
-        ('Social Security and Medicare savings', (e.ss_savings or 0) + (e.medicare_savings or 0) or None, a.payroll_fica_savings),
+        ('Income taxed before the premium', e.taxable_income_before, m(b.taxable_wages)),
+        ('Income taxed after the premium', e.taxable_income_after, m(af.taxable_wages)),
+        ('Pay subject to Medicare, before', e.taxable_income_before, m(b.medicare_gross)),
+        ('Federal tax before the premium', e.federal_before, m(b.federal)),
+        ('Federal tax saved', e.federal_savings, a.payroll_federal_savings),
+        ('State tax saved', e.state_savings, a.payroll_state_savings),
+        ('Social Security and Medicare saved', (e.ss_savings or 0) + (e.medicare_savings or 0) or None, a.payroll_fica_savings),
     ]:
         if eng is None and pay is None:
             continue
         diff = None if (eng is None or pay is None) else round(pay - eng, 2)
-        if diff is not None and abs(diff) <= 0.02 and label in ('Taxable income before', 'Taxable income after', 'Medicare gross before'):
+        if diff is not None and abs(diff) <= 0.02 and label in ('Income taxed before the premium',
+                                                                'Income taxed after the premium',
+                                                                'Pay subject to Medicare, before'):
             rows.append([label, money(eng), money(pay), '$0.00'])
         else:
             rows.append([label, money(eng), money(pay), signed(diff)])
@@ -147,28 +153,30 @@ def employee_block(doc, a, client=''):
     v = _p(doc, f"Verdict: {_verdict_sentence(a)}", size=9.5, bold=True,
            color=GREEN if a.verdict_class == 'green' else (RED if a.verdict_class == 'red' else NAVY), space_after=6)
     _keep(v)
-    _keep(_p(doc, 'Census input', size=9.5, bold=True, color=NAVY, space_after=2))
+    _keep(_p(doc, 'What the census told the proposal', size=9.5, bold=True, color=NAVY, space_after=2))
     _p(doc, _census_sentence(a), space_after=6)
     rows = _paycheck_rows(a)
     if rows:
-        _keep(_p(doc, 'Paycheck comparison', size=9.5, bold=True, color=NAVY, space_after=2))
-        _table(doc, ['Payroll line', 'Before', 'After', 'Change'], rows, [2.9, 1.2, 1.2, 1.1])
+        _keep(_p(doc, 'The two payslips side by side', size=9.5, bold=True, color=NAVY, space_after=2))
+        _table(doc, ['Line on the payslip', 'Before', 'After', 'Change'], rows, [2.9, 1.2, 1.2, 1.1])
         _p(doc, '', space_after=2)
         _arithmetic(doc, a)
     rr = _recon_rows(a)
     if rr:
-        _keep(_p(doc, 'Engine reconciliation', size=9.5, bold=True, color=NAVY, space_after=2))
-        _table(doc, ['Metric', 'Engine', 'Payroll', 'Difference'], rr, [2.9, 1.2, 1.2, 1.1])
+        _keep(_p(doc, 'What the proposal expected, against the payslips', size=9.5, bold=True, color=NAVY, space_after=2))
+        _table(doc, ['Figure', 'Proposal', 'Payslips', 'Difference'], rr, [2.9, 1.2, 1.2, 1.1])
         _p(doc, '', space_after=2)
         if a.engine.taxable_income_before is not None and a.before.medicare_gross is not None:
             gap = a.ti_before_gap
             if gap is not None and abs(gap) <= 0.02:
-                _p(doc, f"Engine taxable income before of {money(a.engine.taxable_income_before)} matches the payroll "
-                        f"medicare gross of {money(round(a.before.medicare_gross * a.pay_periods / 12, 2))}.")
+                _p(doc, f"The proposal started from {money(a.engine.taxable_income_before)} a month of income, which "
+                    f"matches the payslip.")
             else:
-                _p(doc, f"Engine taxable income before of {money(a.engine.taxable_income_before)} differs from payroll "
-                        f"taxable wages of {money(round((a.before.taxable_wages or 0) * a.pay_periods / 12, 2))} by {money(gap)}.")
-    _keep(_p(doc, 'Cause', size=9.5, bold=True, color=NAVY, space_after=2))
+                _p(doc, f"The proposal started from {money(a.engine.taxable_income_before)} a month of income where "
+                        f"the payslip taxes "
+                        f"{money(round((a.before.taxable_wages or 0) * a.pay_periods / 12, 2))}, a difference of "
+                        f"{money(gap)}.")
+    _keep(_p(doc, 'Why', size=9.5, bold=True, color=NAVY, space_after=2))
     named = [f for f in a.findings if f.label not in ('Match', 'No cause could be established', 'No payslip found for this employee')]
     if a.verdict_class == 'green':
         _p(doc, 'No discrepancy identified. The engine allotment equals the actual net pay change.')
@@ -184,9 +192,9 @@ def employee_block(doc, a, client=''):
         for f in named:
             _p(doc, f"{f.label}: {money(f.amount)}. {f.detail}")
     if a.engine.allotment is not None and a.actual_net_change is not None:
-        _keep(_p(doc, 'Allotment against actual net pay', size=9.5, bold=True, color=NAVY, space_after=2))
-        _table(doc, ['Metric', 'Amount'], [['Engine allotment', money(a.engine.allotment)],
-                                           ['Actual net pay change', money(a.actual_net_change)],
+        _keep(_p(doc, 'What was promised, against what the employee got', size=9.5, bold=True, color=NAVY, space_after=2))
+        _table(doc, ['Figure', 'Amount'], [['Promised by the proposal', money(a.engine.allotment)],
+                                           ['Actual change in take home pay', money(a.actual_net_change)],
                                            ['Gap', signed(a.allotment_gap)]], [5.3, 1.6])
         _p(doc, '', space_after=2)
         if abs(a.allotment_gap or 0) <= 0.02:
@@ -224,7 +232,7 @@ def _uncertainty_block(doc, a):
     u = getattr(a, 'uncertainty', None)
     if not u or (not u.get('statements') and not u.get('gap_interval')):
         return
-    _keep(_p(doc, 'Uncertainty analysis, modelled', size=9.5, bold=True, color=NAVY, space_after=2))
+    _keep(_p(doc, 'How sure we are of the figures read from the payslip', size=9.5, bold=True, color=NAVY, space_after=2))
     for st in (u.get('statements') or []):
         names = ', '.join(f"{s['field'].replace('_', ' ')} at {s['probability']:.0%}" for s in st['suspects'])
         _p(doc, f"On the {st['statement']} statement the line least consistent with the others is {names}. "
@@ -246,23 +254,21 @@ def _uncertainty_block(doc, a):
 
 
 def _verdict_sentence(a):
+    """The one line at the top of an employee's block: what happened to this person, in their own terms."""
     if a.verdict_class == 'grey':
         missing = []
-        if a.before.federal is None: missing.append('federal withholding on the before statement')
-        if a.after.federal is None: missing.append('federal withholding on the after statement')
-        if a.engine.allotment is None: missing.append('the proposal allotment')
-        return ('Payroll comparison is unavailable because ' + (', '.join(missing) or 'the required payroll lines') +
-                ' is missing from the submitted data.')
-    if a.engine.federal_savings is not None and a.payroll_federal_savings is not None:
-        if abs((a.federal_gap or 0)) <= 0.02:
-            return (f"Engine federal savings of {money(a.engine.federal_savings)} reconciles to the payroll withholding "
-                    f"change of {money(a.payroll_federal_savings)}.")
-        return (f"Engine federal savings of {money(a.engine.federal_savings)} differs from the payroll withholding change "
-                f"of {money(a.payroll_federal_savings)} by {money(a.federal_gap)}.")
+        if a.before.federal is None: missing.append('the federal tax on the payslip from before the premium')
+        if a.after.federal is None: missing.append('the federal tax on the payslip from after it')
+        if a.engine.allotment is None: missing.append('what the proposal promised this employee')
+        return (a.verdict + '. ' + (', '.join(missing).capitalize() or 'A figure needed for the comparison') +
+                ' could not be found in the files provided.')
+    if a.allotment_gap is not None and abs(a.allotment_gap) <= 0.02:
+        return (f"{a.verdict.rstrip('.')}. The proposal promised {money(a.engine.allotment)} a month and the "
+                f"payslips show {money(a.actual_net_change)}.")
     if a.allotment_gap is not None:
-        return (f"Engine allotment of {money(a.engine.allotment)} differs from the actual net pay change of "
-                f"{money(a.actual_net_change)} by {money(a.allotment_gap)}.")
-    return 'Payroll comparison is unavailable from the submitted data.'
+        return (f"{a.verdict.rstrip('.')}. The proposal promised {money(a.engine.allotment)} a month; the payslips "
+                f"show {money(a.actual_net_change)}, a difference of {money(a.allotment_gap)}.")
+    return a.verdict or 'This employee could not be compared with the files provided.'
 
 
 def _resolution(a):
@@ -310,11 +316,11 @@ def build(audits, summary, notes, client='', files=None, ai_paragraph='', period
     _p(doc, 'Summary', size=12, bold=True, color=NAVY, space_after=4)
     if ai_paragraph:
         _p(doc, ai_paragraph, space_after=8)
-    _table(doc, ['Population', 'Employees', 'Share'],
-           [['Fully reconciled', summary['matched'], f"{summary['matched']/max(summary['employees'],1):.1%}"],
-            ['Difference with an established cause', summary['attributed'], f"{summary['attributed']/max(summary['employees'],1):.1%}"],
-            ['Difference with no established cause', summary['unexplained'], f"{summary['unexplained']/max(summary['employees'],1):.1%}"],
-            ['Source data missing', summary['data_missing'], f"{summary['data_missing']/max(summary['employees'],1):.1%}"],
+    _table(doc, ['Employees', 'How many', 'Share'],
+           [['Getting exactly what was promised', summary['matched'], f"{summary['matched']/max(summary['employees'],1):.1%}"],
+            ['Different from the promise, with a cause we can show', summary['attributed'], f"{summary['attributed']/max(summary['employees'],1):.1%}"],
+            ['Different, and we could not establish why', summary['unexplained'], f"{summary['unexplained']/max(summary['employees'],1):.1%}"],
+            ['Could not be checked, something was missing', summary['data_missing'], f"{summary['data_missing']/max(summary['employees'],1):.1%}"],
             ['Total', summary['employees'], '100.0%']], [4.2, 1.4, 1.3])
     _p(doc, '', space_after=8)
     if summary['causes']:
