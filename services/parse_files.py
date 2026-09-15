@@ -217,7 +217,7 @@ def _orientation_score(text):
     return score
 
 
-def ocr_page(data: bytes, index: int, scale=2.6, hint_box=None):
+def ocr_page(data: bytes, index: int, scale=2.2, hint_box=None):
     """OCR one page. Scanned packs often contain rotated pages, so read each candidate rotation and keep the best.
     hint_box is a one-element list holding the angle that won on an earlier page of the same pack; packs are
     consistently oriented, so trying that angle first usually settles the page on the first pass."""
@@ -229,12 +229,17 @@ def ocr_page(data: bytes, index: int, scale=2.6, hint_box=None):
         order = [hint_box[0]] + [a for a in order if a != hint_box[0]]
     for angle in order:
         buf = io.BytesIO()
-        im = Image.open(io.BytesIO(png))
-        (im if angle == 0 else im.rotate(angle, expand=True)).save(buf, 'PNG')
+        with Image.open(io.BytesIO(png)) as im:
+            rot = im if angle == 0 else im.rotate(angle, expand=True)
+            rot.save(buf, 'PNG')
+            if rot is not im:
+                rot.close()
         try:
             text = _ocr_once(buf.getvalue())
         except Exception:
             continue
+        finally:
+            buf.close()
         sc = _orientation_score(text)
         if sc > best_score:
             best, best_score, best_angle = text, sc, angle
@@ -248,13 +253,19 @@ def ocr_page(data: bytes, index: int, scale=2.6, hint_box=None):
 
 
 def pdf_page_png(data: bytes, index: int, scale=2.0):
+    """Render one page as a grayscale PNG. Grayscale is a third of the memory of RGB and OCR reads it just as well,
+    which matters because the container has 512 MiB and several pages are in flight at once."""
     import pypdfium2 as pdfium
     doc = pdfium.PdfDocument(io.BytesIO(data))
-    page = doc[index]
-    bmp = page.render(scale=scale)
-    buf = io.BytesIO()
-    bmp.to_pil().save(buf, format='PNG')
-    return buf.getvalue()
+    try:
+        bmp = doc[index].render(scale=scale, grayscale=True)
+        im = bmp.to_pil()
+        buf = io.BytesIO()
+        im.save(buf, format='PNG')
+        im.close()
+        return buf.getvalue()
+    finally:
+        doc.close()
 
 
 def _amount_for(line, label_match):
@@ -344,12 +355,16 @@ def _page_record(data, i, text, hint, rot):
     return recs
 
 
-def paychecks_from_pdf(data: bytes, hint='', max_pages=200, progress=None, workers=8):
+def paychecks_from_pdf(data: bytes, hint='', max_pages=200, progress=None, workers=None):
     """One record per statement page. The label regex runs first because it is deterministic; Groq fills what the
     regex could not find and names the employee when the layout hides it. Pages with no text layer are OCRd first.
     Pages are independent, so they are read concurrently: OCR waits on the shell and the model call waits on the
     network, and a pack of eighty statements is otherwise almost all waiting."""
     from concurrent.futures import ThreadPoolExecutor
+    if workers is None:
+        # Each page in flight holds a rendered bitmap and a tesseract process. Three at a time fits the 512 MiB
+        # container; the instance was OOM killed at eight.
+        workers = int(os.environ.get('PDF_WORKERS', '3'))
     pages = pdf_pages_text(data) or []
     if not pages:
         try:
