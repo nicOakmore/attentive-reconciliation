@@ -202,12 +202,13 @@ def _attribute(emp: EmployeeAudit) -> list:
                            'Federal withholding reaches zero after the premium: the deduction returns all of it and no more '
                            'is available.'))
     identity_broken = emp.identity_gap is not None and abs(emp.identity_gap) > 2.0
-    if identity_broken and emp.federal_gap is not None:
+    if identity_broken:
         out.append(Finding('Statement lines inconsistent', emp.identity_gap,
                            'The withholding savings plus the FICA savings less the fee does not equal the net pay change '
-                           'on these statements, so one printed line could not be read reliably. The federal comparison '
-                           'is withheld for this employee. The allotment reconciliation below rests on net pay and is '
-                           'unaffected.'))
+                           'on these statements, so at least one printed line could not be read reliably'
+                           + ('' if getattr(emp, 'fee_from_statement', False) else ', and the employee fee was taken from the '
+                              'proposal because no after-tax fee line was found') +
+                           '. Treat this employee\'s figures as unverified and check the statement by hand.'))
     elif emp.federal_gap is not None and abs(emp.federal_gap) > CENT:
         out.append(Finding('Federal withholding tables', emp.federal_gap,
                            'The engine and the payroll provider hold different withholding tables, which moves the saving '
@@ -243,6 +244,8 @@ def _verdict(emp: EmployeeAudit):
         return 'Engine matches payroll', 'green'
     if any(f.label == 'Unattributed' for f in emp.findings):
         return 'Difference not attributed', 'red'
+    if any(f.label == 'Statement lines inconsistent' for f in emp.findings):
+        return 'Statement could not be read reliably', 'red'
     if emp.actual_net_change is not None and emp.actual_net_change < 0:
         return 'Net pay falls, cause identified', 'yellow'
     return 'Difference attributed', 'yellow'
