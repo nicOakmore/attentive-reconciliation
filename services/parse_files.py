@@ -212,7 +212,7 @@ def _layout_from_words(d):
 def ocr_selftest():
     """What the container can actually do: which engine, which version, and how long one page takes."""
     import time
-    out = {}
+    out = {'engine': 'rapidocr' if _rapid_engine() else 'tesseract', 'rapidocr_error': _RAPID_ERROR[0]}
     try:
         import pytesseract
         out['tesseract_version'] = str(pytesseract.get_tesseract_version())
@@ -233,6 +233,7 @@ def ocr_selftest():
 
 TESS_CONFIG = '--oem 1 --psm 6 -c preserve_interword_spaces=1'
 _RAPID = [None]
+_RAPID_ERROR = ['']
 _RAPID_LOCK = threading.Lock()
 
 
@@ -243,6 +244,7 @@ def _rapid_engine():
             if _RAPID[0] is None:
                 try:
                     from rapidocr_onnxruntime import RapidOCR
+                    _RAPID_ERROR[0] = ''
                     # One inference thread per engine: several pages are read at once, and letting each of them
                     # grab every core makes the whole container thrash instead of finishing pages.
                     n = int(os.environ.get('OCR_THREADS', '1'))
@@ -250,7 +252,8 @@ def _rapid_engine():
                         _RAPID[0] = RapidOCR(intra_op_num_threads=n, inter_op_num_threads=n)
                     except TypeError:
                         _RAPID[0] = RapidOCR()
-                except Exception:
+                except Exception as e:
+                    _RAPID_ERROR[0] = f'{type(e).__name__}: {e}'[:300]
                     _RAPID[0] = False
     return _RAPID[0] or None
 
