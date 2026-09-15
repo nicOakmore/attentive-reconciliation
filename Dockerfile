@@ -6,4 +6,6 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 ENV PORT=10000
-CMD gunicorn app:app --bind 0.0.0.0:$PORT --workers 2 --threads 4 --timeout 900
+# One worker on purpose: a run lives in process memory, and a second worker would answer the status poll and the
+# docx download from a process that never saw the job.
+CMD gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --threads 16 --timeout 3600

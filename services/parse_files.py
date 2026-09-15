@@ -1,7 +1,7 @@
 """File ingestion. Spreadsheets are read deterministically. Payroll PDFs are read as text when the PDF carries text,
 and through Groq vision when the pages are scans. Nothing here computes a saving.
 """
-import io, re, os, unicodedata
+import io, threading, re, os, unicodedata
 import openpyxl
 from . import groq_client
 from .audit import Census, Engine, Paycheck, EmployeeAudit, r2
@@ -170,6 +170,11 @@ def pdf_pages_text(data: bytes):
         return []
 
 
+# The macOS Vision engine aborts the process when it is called from several threads at once, so every Vision call
+# is serialised. Tesseract is a subprocess and stays parallel, which is what runs in the container.
+_VISION_LOCK = threading.Lock()
+
+
 def _ocr_once(png):
     try:
         import pytesseract
@@ -177,6 +182,11 @@ def _ocr_once(png):
         return pytesseract.image_to_string(Image.open(io.BytesIO(png)))
     except Exception:
         pass
+    with _VISION_LOCK:
+        return _vision_ocr(png)
+
+
+def _vision_ocr(png):
     import tempfile
     from ocrmac import ocrmac
     with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as t:

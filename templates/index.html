@@ -139,13 +139,12 @@ async function run(sample) {
   fd.append('period', document.getElementById('period').value);
   if (sample) fd.append('sample', sample);
   else for (const k in files) if (files[k]) fd.append(k, files[k]);
-  document.getElementById('status').innerHTML = '<span class="spinner"></span> reading files and reconciling';
+  document.getElementById('status').innerHTML = '<span class="spinner"></span> uploading';
   document.getElementById('btn-run').disabled = true;
   document.getElementById('dl').style.display = 'none';
+  document.getElementById('out').innerHTML = '';
   try {
-    const r = await fetch('/audit', {method: 'POST', body: fd});
-    const d = await r.json();
-    if (!r.ok) throw new Error(d.error || 'failed');
+    const d = await poll(fd);
     render(d);
     document.getElementById('status').textContent = d.employees.length + ' employees in ' + d.seconds + 's';
     const a = document.getElementById('dl');
@@ -155,6 +154,33 @@ async function run(sample) {
     document.getElementById('out').innerHTML = '<div class="card"><div class="diag red">' + e.message + '</div></div>';
   }
   document.getElementById('btn-run').disabled = false;
+}
+
+// Reading a pack of eighty statements takes minutes, so the server answers with a job id and the page follows it.
+async function asJson(r) {
+  const t = await r.text();
+  try { return JSON.parse(t); }
+  catch (e) { throw new Error('The server replied with ' + r.status + ' ' + r.statusText + ' instead of a result. ' +
+                              t.replace(/<[^>]*>/g, ' ').trim().slice(0, 200)); }
+}
+
+async function poll(fd) {
+  const start = await asJson(await fetch('/audit', {method: 'POST', body: fd}));
+  if (start.error) throw new Error(start.error);
+  const st = document.getElementById('status');
+  let misses = 0;
+  for (let i = 0; i < 1800; i++) {
+    await new Promise(r => setTimeout(r, 2000));
+    let d;
+    try { d = await asJson(await fetch('/status/' + start.job)); }
+    catch (e) { if (++misses > 5) throw e; continue; }   // tolerate a few dropped polls, not a lost job
+    if (d.state === 'done') return d;
+    if (d.state === 'error') throw new Error(d.error);
+    st.innerHTML = '<span class="spinner"></span> ' + (d.stage || 'working') +
+                   (d.total ? ' &middot; ' + Math.round(100 * d.done / d.total) + '%' : '') +
+                   ' &middot; ' + Math.round(d.elapsed) + 's';
+  }
+  throw new Error('The run did not finish within an hour.');
 }
 
 function render(d) {

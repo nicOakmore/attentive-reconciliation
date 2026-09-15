@@ -3,7 +3,7 @@
 The arithmetic is deterministic (services/audit.py). Groq reads payroll statements that have no text layer and maps
 unfamiliar spreadsheet headers, and writes the one summary paragraph. It never produces a number or a cause.
 """
-import os, io, json, uuid, time, traceback
+import os, io, json, uuid, time, traceback, threading
 from flask import Flask, request, jsonify, send_file, render_template, abort
 
 from services import build as builder
@@ -54,6 +54,8 @@ def _samples():
 
 @app.post('/audit')
 def audit():
+    """Start the run and return a job id at once. A full pack takes minutes, and a request held open that long comes
+    back through the proxy as an HTML gateway page, which the page cannot parse. The browser polls /status instead."""
     client = (request.form.get('client') or '').strip()
     period = (request.form.get('period') or '').strip()
     sample = (request.form.get('sample') or '').strip()
@@ -73,10 +75,26 @@ def audit():
             before, after = _file('payroll_before'), _file('payroll_after')
         if not (census or rep):
             return jsonify(error='Upload the census or the proposal report.'), 400
-        t0 = time.time()
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify(error=f'{type(e).__name__}: {e}'), 400
+
+    job = uuid.uuid4().hex[:12]
+    JOBS[job] = dict(state='running', stage='reading the files', done=0, total=0, created=time.time())
+    threading.Thread(target=_work, args=(job, census, rep, before, after, client, period), daemon=True).start()
+    return jsonify(job=job, state='running')
+
+
+def _work(job, census, rep, before, after, client, period):
+    j = JOBS[job]
+    t0 = time.time()
+    try:
+        def progress(done, total):
+            j.update(done=done, total=total, stage=f'reading payroll statements, {done} of {total}')
         audits, summary, notes = builder.run(census_bytes=census[0] if census else None,
                                              report_bytes=rep[0] if rep else None,
-                                             before=before, after=after)
+                                             before=before, after=after, progress=progress)
+        j.update(stage='writing the summary')
         files = [f"{label}: {blob[1]}" for label, blob in
                  (('Census', census), ('Proposal report', rep), ('Payroll before', before), ('Payroll after', after)) if blob]
         para = ''
@@ -88,15 +106,27 @@ def audit():
                                                       causes=[[k, v['employees'], v['amount']] for k, v in summary['causes'][:4]]))
         except Exception as e:
             notes.append(f'Summary paragraph unavailable: {str(e)[:120]}')
-        job = uuid.uuid4().hex[:12]
-        JOBS[job] = dict(audits=audits, summary=summary, notes=notes, client=client, period=period,
-                         files=files, para=para, created=time.time())
-        return jsonify(job=job, seconds=round(time.time() - t0, 1), client=client, period=period,
-                       summary=summary, notes=notes, files=files, paragraph=para,
-                       employees=[_row(a) for a in audits])
+        j.update(state='done', stage='done', audits=audits, summary=summary, notes=notes, client=client,
+                 period=period, files=files, para=para,
+                 payload=dict(job=job, seconds=round(time.time() - t0, 1), client=client, period=period,
+                              summary=summary, notes=notes, files=files, paragraph=para,
+                              employees=[_row(a) for a in audits]))
     except Exception as e:
         traceback.print_exc()
-        return jsonify(error=f'{type(e).__name__}: {e}'), 500
+        j.update(state='error', error=f'{type(e).__name__}: {e}')
+
+
+@app.get('/status/<job>')
+def status(job):
+    j = JOBS.get(job)
+    if not j:
+        return jsonify(error='unknown job'), 404
+    if j['state'] == 'done':
+        return jsonify(state='done', **j['payload'])
+    if j['state'] == 'error':
+        return jsonify(state='error', error=j['error']), 500
+    return jsonify(state='running', stage=j.get('stage', ''), done=j.get('done', 0), total=j.get('total', 0),
+                   elapsed=round(time.time() - j['created'], 1))
 
 
 def _row(a):
