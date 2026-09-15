@@ -198,32 +198,32 @@ def employee_block(doc, a, client=''):
                                            ['Gap', signed(a.allotment_gap)]], [5.3, 1.6])
         _p(doc, '', space_after=2)
         if abs(a.allotment_gap or 0) <= 0.02:
-            _p(doc, f"Engine allotment is {money(a.engine.allotment)} and the actual net pay change is "
-                    f"{money(a.actual_net_change)}. They agree.")
+            _p(doc, f"The proposal promised {money(a.engine.allotment)} a month and that is what the payslips show.")
         else:
             # One finding is only presented as the cause of the whole gap when it is the only finding open. Where
             # several are open, the report says what is established and stops short of apportioning the gap.
             open_findings = [f for f in named]
-            head = (f"Engine allotment is {money(a.engine.allotment)}. Actual net pay change is "
+            head = (f"The proposal promised {money(a.engine.allotment)} a month. The payslips show "
                     f"{money(a.actual_net_change)}. The difference is {money(a.allotment_gap)}. ")
             if len(open_findings) == 1:
                 f = open_findings[0]
-                _p(doc, head + f"The only finding established on the submitted data is "
-                              f"{f.label.lower()}{' of ' + money(f.amount) if f.amount is not None else ''}. "
-                              f"Quantifying its effect on the difference requires a rerun with that input corrected.")
+                _p(doc, head + f"The one thing the files show is "
+                              f"{f.label.lower()}{', ' + money(f.amount) + ' a month' if f.amount is not None else ''}. "
+                              f"How much of the difference that accounts for can only be seen by correcting it and "
+                              f"running the proposal again.")
             elif open_findings:
                 bits = ', '.join(f"{f.label.lower()}{' of ' + money(f.amount) if f.amount is not None else ''}"
                                  for f in open_findings)
-                _p(doc, head + f"The submitted data establishes more than one finding on this employee: {bits}. "
-                              f"The tool does not apportion the difference between them; correct the census input, "
-                              f"rerun the calculation and reassess what remains.")
+                _p(doc, head + f"More than one thing is going on here: {bits}. This tool will not guess how much "
+                              f"of the difference belongs to each, so correct the census, run the proposal again "
+                              f"and see what is left.")
             else:
-                _p(doc, head + 'The submitted data does not establish a cause.')
+                _p(doc, head + 'The files provided do not show what caused it.')
     elif a.engine.allotment is None or a.actual_net_change is None:
         miss = 'the proposal allotment' if a.engine.allotment is None else 'net pay on both statements'
         _p(doc, f"Allotment against actual net pay cannot be reconciled because {miss} is unavailable.")
     _uncertainty_block(doc, a)
-    _p(doc, f"Resolution: {_resolution(a)}", bold=True, space_after=14)
+    _p(doc, _resolution(a), bold=True, space_after=14)
 
 
 def _uncertainty_block(doc, a):
@@ -325,25 +325,24 @@ def build(audits, summary, notes, client='', files=None, ai_paragraph='', period
     _p(doc, '', space_after=8)
     if summary['causes']:
         _p(doc, 'Causes', size=12, bold=True, color=NAVY, space_after=4)
-        _p(doc, 'Cause counts are not mutually exclusive. An employee may carry more than one cause, so these counts '
-                'do not sum to the population. A cause is reported only where a reliably extracted payroll line or '
-                'census field establishes it; the absence of a cause is not evidence that the underlying condition '
-                'is absent.', size=8.5, color=GREY, space_after=4)
+        _p(doc, 'An employee can appear under more than one cause, so these numbers add up to more than the number of '
+            'employees. A cause is only listed where a payslip line or a census field shows it; if something is not '
+            'listed, it means this tool could not see it, not that it is not there.',
+         size=8.5, color=GREY, space_after=4)
         _table(doc, ['Cause', 'Employees', 'Amount, monthly'],
                [[k, v['employees'], money(v['amount'])] for k, v in summary['causes']], [4.2, 1.4, 1.3])
         _p(doc, '', space_after=8)
     if summary.get('total_gap') is not None:
         unver = summary.get('unverified', 0)
-        _p(doc, f"The aggregate difference between engine allotment and reported net pay change is "
-                f"{money(summary['total_gap'])} a month. It is calculated over the {summary['covered']} employees "
-                f"who carry an accepted net pay on both statements and an allotment in the proposal report, in a "
-                f"population of {summary['employees']}"
-                + (f", and {unver} of those {summary['covered']} carry an untied statement identity and are "
-                   f"reported unverified; their figures are included in this total and should be read with that "
-                   f"qualification." if unver else '.')
-                + f" {summary['decreases']} employees show lower reported net pay on the statement after the "
-                  f"premium than on the statement before it.", space_after=8)
-    _p(doc, 'Scope and method', size=12, bold=True, color=NAVY, space_after=4)
+        _p(doc, f"Across everyone checked, the difference between what the proposal promised and what the "
+                f"payslips show is {money(summary['total_gap'])} a month. That covers the {summary['covered']} "
+                f"employees with a usable payslip both before and after the premium, out of {summary['employees']}"
+                + (f". {unver} of those {summary['covered']} are marked as not verified because their payslips do "
+                   f"not add up; their figures are in this total and should be read with that in mind."
+                   if unver else '.')
+                + f" {summary['decreases']} employees take home less after the premium than before it, on their "
+                  f"own payslips.", space_after=8)
+    _p(doc, 'What was checked, and how', size=12, bold=True, color=NAVY, space_after=4)
     for n in (files or []) + notes:
         _p(doc, n, size=9, color=GREY, space_after=2)
     _p(doc, 'Census fields are the engine inputs. The payroll before the premium is the baseline and the payroll after '
@@ -354,18 +353,18 @@ def build(audits, summary, notes, client='', files=None, ai_paragraph='', period
             'establishes it, and an employee the data does not settle is reported unverified rather than assigned a '
             'reconciliation.', size=9, color=GREY, space_after=8)
     pop0 = summary.get('population') or {}
-    _p(doc, f"On this payroll pack, {pop0.get('both', 0)} of {summary['employees']} employees have an accepted net "
-            f"pay value on both statements; {summary.get('unverified', 0)} of those {pop0.get('both', 0)} are "
-            f"reported unverified because the independent payroll identity does not tie, and no payroll value is "
-            f"overridden solely to force a reconciliation.", space_after=10)
-    _p(doc, 'Population and matching', size=12, bold=True, color=NAVY, space_after=4)
+    _p(doc, f"Of {summary['employees']} employees, {pop0.get('both', 0)} had a usable payslip both before and "
+            f"after the premium. {summary.get('unverified', 0)} of those are marked as not verified because the "
+            f"figures on their payslips do not add up. No figure was changed to make a comparison work.",
+         space_after=10)
+    _p(doc, 'Who was checked', size=12, bold=True, color=NAVY, space_after=4)
     pop = summary.get('population') or {}
     _table(doc, ['Control', 'Count'],
-           [['Employees in the proposal report and census, the defined population', summary['employees']],
-            ['Matched to both a before and an after statement', pop.get('both', 0)],
-            ['Matched to one statement only', pop.get('one', 0)],
-            ['Matched to no statement', pop.get('none', 0)],
-            ['Statements in the packs not matched to any employee, excluded', pop.get('unmatched_statements', 0)]],
+           [['Employees on the census and the proposal', summary['employees']],
+            ['Had a payslip from before and after the premium', pop.get('both', 0)],
+            ['Had only one of the two payslips', pop.get('one', 0)],
+            ['Had no payslip at all', pop.get('none', 0)],
+            ['Payslips that belong to nobody on the census, set aside', pop.get('unmatched_statements', 0)]],
            [5.2, 1.7])
     _p(doc, '', space_after=4)
     _p(doc, 'Statements are matched to employees by payroll employee number first, then by last name with the first '
