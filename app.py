@@ -180,6 +180,39 @@ def diag():
                                  total=v.get('total')) for k, v in JOBS.items()})
 
 
+@app.post('/diag_pack')
+def diag_pack():
+    """Read a pack with the container's own OCR and report, page by page, which fields the label reader found.
+    This is how coverage is measured on the engine that actually runs, rather than on a developer machine."""
+    import time
+    from services import parse_files as P
+    up = request.files.get('pdf')
+    if not up:
+        return jsonify(error='post a pdf'), 400
+    data = up.read()
+    n = int(request.args.get('pages', '0')) or None
+    rot, out = [None], []
+    pages = P.pdf_pages_text(data) or []
+    if not pages:
+        import pypdfium2 as pdfium, io as _io
+        pages = [''] * len(pdfium.PdfDocument(_io.BytesIO(data)))
+    for i in range(len(pages) if n is None else min(n, len(pages))):
+        t = time.time()
+        try:
+            text = P.ocr_page(data, i, hint_box=rot)
+        except Exception as e:
+            out.append(dict(page=i + 1, error=str(e)[:80])); continue
+        r = P.parse_text_paycheck(text)
+        keys = ('name', 'gross', 'federal', 'net_pay', 'taxable_wages', 'medicare_gross', 'social_security',
+                'medicare', 'retirement', 'premium', 'fee', 'reimbursement')
+        out.append(dict(page=i + 1, seconds=round(time.time() - t, 1), chars=len(text),
+                        found={k: r.get(k) for k in keys},
+                        missing=[k for k in ('name', 'federal', 'net_pay', 'taxable_wages', 'medicare_gross')
+                                 if r.get(k) is None],
+                        corrected=r.get('net_pay_corrected'), unreliable=r.get('net_pay_unreliable')))
+    return jsonify(pages=out, needing_model=sum(1 for p in out if p.get('missing')))
+
+
 @app.get('/healthz')
 def healthz():
     ok, model = groq_client.health()
