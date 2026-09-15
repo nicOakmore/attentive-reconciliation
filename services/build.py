@@ -39,6 +39,9 @@ def run(census_bytes=None, report_bytes=None, before=None, after=None, before_na
         else:
             recs = P.paychecks_from_pdf(data, hint=label, progress=progress, source_name=fname,
                                         store_stats=store_stats)
+            failed = sum(1 for r in recs if not (r.get('name') or r.get('employee_id')))
+            if failed:
+                notes.append(f'{label}: {failed} pages could not be read')
             modelled = sum(1 for r in recs if 'model' in (r.get('source') or ''))
             notes.append(f'{label}: {len(recs)} statements read from {fname}'
                          + (f', of which {modelled} needed the model to locate a line' if modelled else ''))

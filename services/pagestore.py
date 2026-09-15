@@ -52,16 +52,18 @@ def canonical_render(data: bytes, index: int, scale=KEY_SCALE) -> bytes:
     A render of the page content is stable for a given renderer, and the renderer version is part of the key.
     """
     import pypdfium2 as pdfium
-    doc = pdfium.PdfDocument(io.BytesIO(data))
-    try:
-        bmp = doc[index].render(scale=scale, grayscale=True)
-        im = bmp.to_pil()
-        buf = io.BytesIO()
-        im.save(buf, format='PNG', optimize=False, compress_level=1)
-        im.close()
-        return buf.getvalue()
-    finally:
-        doc.close()
+    from .parse_files import PDF_LOCK
+    with PDF_LOCK:
+        doc = pdfium.PdfDocument(io.BytesIO(data))
+        try:
+            bmp = doc[index].render(scale=scale, grayscale=True)
+            im = bmp.to_pil()
+            buf = io.BytesIO()
+            im.save(buf, format='PNG', optimize=False, compress_level=1)
+            im.close()
+            return buf.getvalue()
+        finally:
+            doc.close()
 
 
 def renderer_version() -> str:

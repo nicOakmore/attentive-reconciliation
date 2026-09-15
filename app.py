@@ -108,6 +108,8 @@ def _work(job, census, rep, before, after, client, period):
                                                       causes=[[k, v['employees'], v['amount']] for k, v in summary['causes'][:4]]))
         except Exception as e:
             notes.append(f'Summary paragraph unavailable: {str(e)[:120]}')
+        for n in notes:                      # the run's own account of what it read belongs in the log
+            print(f'[run {job}] {n}', flush=True)
         j.update(state='done', stage='done', audits=audits, summary=summary, notes=notes, client=client,
                  period=period, files=files, para=para,
                  payload=dict(job=job, seconds=round(time.time() - t0, 1), client=client, period=period,

@@ -174,6 +174,10 @@ def pdf_pages_text(data: bytes):
 # The macOS Vision engine aborts the process when it is called from several threads at once, so every Vision call
 # is serialised. Tesseract is a subprocess and stays parallel, which is what runs in the container.
 _VISION_LOCK = threading.Lock()
+# The PDF library is not safe to call from several threads at once: opening or rendering a document concurrently
+# throws, and with pages read in parallel that means every page fails in a tenth of a second. Rendering is quick,
+# so it is serialised and the threads spend their time in the OCR engine, which is where the work actually is.
+PDF_LOCK = threading.RLock()
 
 
 def _layout_from_items(items):
@@ -418,19 +422,20 @@ def _osd_rotation(data, index):
 
 
 def pdf_page_png(data: bytes, index: int, scale=2.0):
-    """Render one page as a grayscale PNG. Grayscale is a third of the memory of RGB and OCR reads it just as well,
+    """Render one page as a grayscale PNG. Serialised: see PDF_LOCK. Grayscale is a third of the memory of RGB and OCR reads it just as well,
     which matters because the container has 512 MiB and several pages are in flight at once."""
     import pypdfium2 as pdfium
-    doc = pdfium.PdfDocument(io.BytesIO(data))
-    try:
-        bmp = doc[index].render(scale=scale, grayscale=True)
-        im = bmp.to_pil()
-        buf = io.BytesIO()
-        im.save(buf, format='PNG')
-        im.close()
-        return buf.getvalue()
-    finally:
-        doc.close()
+    with PDF_LOCK:
+        doc = pdfium.PdfDocument(io.BytesIO(data))
+        try:
+            bmp = doc[index].render(scale=scale, grayscale=True)
+            im = bmp.to_pil()
+            buf = io.BytesIO()
+            im.save(buf, format='PNG')
+            im.close()
+            return buf.getvalue()
+        finally:
+            doc.close()
 
 
 COMPACT_PATTERNS = {

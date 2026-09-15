@@ -196,7 +196,7 @@ function render(d) {
     s.causes.forEach(c => h += '<tr><td>' + c[0] + '</td><td class="num">' + c[1].employees + '</td><td class="num">' + money(c[1].amount) + '</td></tr>');
     h += '</table>';
   }
-  h += '<div class="text-xs muted mt-2">' + (d.files || []).concat(d.notes || []).join(' · ') + '</div></div>';
+  h += '</div>';
 
   h += '<div class="card"><div class="card-title">Employees</div><table class="results-table"><thead><tr>' +
        '<th>Employee</th><th>Verdict</th><th class="num">Engine allotment</th><th class="num">Actual net change</th>' +
