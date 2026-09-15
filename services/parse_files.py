@@ -1,7 +1,7 @@
 """File ingestion. Spreadsheets are read deterministically. Payroll PDFs are read as text when the PDF carries text,
 and through Groq vision when the pages are scans. Nothing here computes a saving.
 """
-import io, threading, re, os, unicodedata
+import io, threading, re, os, unicodedata, time as _time
 import openpyxl
 from . import groq_client
 from .audit import Census, Engine, Paycheck, EmployeeAudit, r2
@@ -514,10 +514,13 @@ def paychecks_from_pdf(data: bytes, hint='', max_pages=200, progress=None, worke
 
     def work(arg):
         i, text = arg
+        t0 = _time.time()
         try:
             out = _page_record(data, i, text, hint, rot)
         except Exception as e:
             out = [dict(name=None, source=f'page {i+1}, failed: {str(e)[:70]}')]
+        print(f'[read] {hint or "pack"} page {i+1}/{len(pages)} {_time.time() - t0:.1f}s '
+              f'{(out[0].get("name") if out else None) or "no name"}', flush=True)
         done[0] += 1
         if progress:
             progress(done[0], len(pages))
