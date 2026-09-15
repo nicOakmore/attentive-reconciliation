@@ -62,7 +62,7 @@
     </div>
     <div class="flex gap-2" style="align-items:center;">
       <span class="text-xs muted">AI engine:</span>
-      <span class="pill {{ 'green' if groq_ok else 'red' }}">{{ 'Groq ' + groq_model if groq_ok else 'unavailable' }}</span>
+      <span class="pill {{ 'green' if groq_ok else 'red' }}">{{ 'Oakmore AI 1.0.14' if groq_ok else 'unavailable' }}</span>
     </div>
   </div>
 
@@ -160,7 +160,8 @@ async function run(sample) {
 function render(d) {
   const s = d.summary;
   let h = '<div class="card"><div class="card-title">Summary</div><div class="summary-grid">';
-  h += box(s.employees, 'employees') + box(s.matched, 'reconciled', 'green') + box(s.attributed, 'cause found', 'yellow')
+  h += box(s.employees, 'employees') + box(s.covered + ' of ' + s.employees, 'statements matched')
+     + box(s.matched, 'reconciled', 'green') + box(s.attributed, 'cause found', 'yellow')
      + box(s.unexplained, 'no cause', 'red') + box(money(s.total_gap), 'monthly gap', 'acc');
   h += '</div>';
   if (d.paragraph) h += '<div class="sentence">' + d.paragraph + '<span class="ai-badge">AI</span></div>';

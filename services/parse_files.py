@@ -207,12 +207,17 @@ def _orientation_score(text):
     return score
 
 
-def ocr_page(data: bytes, index: int, scale=2.6):
-    """OCR one page. Scanned packs often contain rotated pages, so read each candidate rotation and keep the best."""
+def ocr_page(data: bytes, index: int, scale=2.6, hint_box=None):
+    """OCR one page. Scanned packs often contain rotated pages, so read each candidate rotation and keep the best.
+    hint_box is a one-element list holding the angle that won on an earlier page of the same pack; packs are
+    consistently oriented, so trying that angle first usually settles the page on the first pass."""
     from PIL import Image
     png = pdf_page_png(data, index, scale=scale)
-    best, best_score = '', -1
-    for angle in (0, 180, 90, 270):
+    best, best_score, best_angle = '', -1, 0
+    order = [0, 180, 90, 270]
+    if hint_box and hint_box[0] in order:
+        order = [hint_box[0]] + [a for a in order if a != hint_box[0]]
+    for angle in order:
         buf = io.BytesIO()
         im = Image.open(io.BytesIO(png))
         (im if angle == 0 else im.rotate(angle, expand=True)).save(buf, 'PNG')
@@ -222,11 +227,13 @@ def ocr_page(data: bytes, index: int, scale=2.6):
             continue
         sc = _orientation_score(text)
         if sc > best_score:
-            best, best_score = text, sc
+            best, best_score, best_angle = text, sc, angle
         if best_score >= 24:          # a clean upright statement scores well above this
             break
     if best_score < 0:
         raise RuntimeError('no OCR engine available')
+    if hint_box is not None:
+        hint_box[0] = best_angle
     return best
 
 
@@ -280,9 +287,59 @@ def parse_text_paycheck(text):
     return out
 
 
-def paychecks_from_pdf(data: bytes, hint='', max_pages=200, progress=None):
+def _page_record(data, i, text, hint, rot):
+    """Read one statement page. Returns a list of records (usually one)."""
+    recs = []
+    src_kind = 'text layer'
+    page_text = text if (text and len(text.strip()) > 120) else ''
+    if not page_text:
+        try:
+            page_text, src_kind = ocr_page(data, i, hint_box=rot), 'OCR'
+        except Exception as e:
+            return [dict(name=None, source=f'page {i+1}, unreadable: {str(e)[:70]}')]
+    base = parse_text_paycheck(page_text)
+    need = [k for k in ('name', 'federal', 'net_pay', 'taxable_wages', 'medicare_gross') if base.get(k) is None]
+    used_model = False
+    if need:
+        for attempt in (1, 2):
+            try:
+                for r in groq_client.structure_paycheck_text(page_text, hint=hint):
+                    cand = dict(name=r.get('employee_name'), employee_id=r.get('employee_id'),
+                                gross=num(r.get('gross')), federal=num(r.get('federal_withholding')),
+                                state=num(r.get('state_withholding')), state_code=r.get('state_code'),
+                                social_security=num(r.get('social_security')), medicare=num(r.get('medicare')),
+                                taxable_wages=num(r.get('taxable_wages')), medicare_gross=num(r.get('medicare_gross')),
+                                net_pay=num(r.get('net_pay')), premium=num(r.get('premium_pretax')),
+                                reimbursement=num(r.get('reimbursement')), fee=num(r.get('employee_fee_aftertax')),
+                                product=num(r.get('product_sold')), retirement=num(r.get('retirement')),
+                                cafeteria=num(r.get('cafeteria_pretax')), other_deductions=num(r.get('other_deductions')))
+                    merged = dict(cand)
+                    for k, v in base.items():          # the regex reading wins wherever it found a value
+                        if v is not None:
+                            merged[k] = v
+                    used_model = True
+                    if merged.get('name') or merged.get('employee_id'):
+                        merged['source'] = f'page {i+1}, {src_kind}, model filled'
+                        merged['fee_from_statement'] = merged.get('fee') is not None
+                        recs.append(merged)
+                if used_model and recs and (recs[-1].get('name') or recs[-1].get('employee_id')):
+                    break
+            except Exception as e:
+                if attempt == 2:
+                    recs.append(dict(**base, source=f'page {i+1}, {src_kind}, model unavailable: {str(e)[:60]}'))
+    if not used_model and (base.get('name') or base.get('employee_id')):
+        base['source'] = f'page {i+1}, {src_kind}'
+        base['fee_from_statement'] = base.get('fee') is not None
+        recs.append(base)
+    return recs
+
+
+def paychecks_from_pdf(data: bytes, hint='', max_pages=200, progress=None, workers=8):
     """One record per statement page. The label regex runs first because it is deterministic; Groq fills what the
-    regex could not find and names the employee when the layout hides it. Pages with no text layer are OCRd first."""
+    regex could not find and names the employee when the layout hides it. Pages with no text layer are OCRd first.
+    Pages are independent, so they are read concurrently: OCR waits on the shell and the model call waits on the
+    network, and a pack of eighty statements is otherwise almost all waiting."""
+    from concurrent.futures import ThreadPoolExecutor
     pages = pdf_pages_text(data) or []
     if not pages:
         try:
@@ -290,50 +347,23 @@ def paychecks_from_pdf(data: bytes, hint='', max_pages=200, progress=None):
             pages = [''] * len(pdfium.PdfDocument(io.BytesIO(data)))
         except Exception:
             pages = []
-    recs = []
-    for i, text in enumerate(pages[:max_pages]):
+    pages = pages[:max_pages]
+    rot, done = [0], [0]
+
+    def work(arg):
+        i, text = arg
+        try:
+            out = _page_record(data, i, text, hint, rot)
+        except Exception as e:
+            out = [dict(name=None, source=f'page {i+1}, failed: {str(e)[:70]}')]
+        done[0] += 1
         if progress:
-            progress(i + 1, len(pages))
-        src_kind = 'text layer'
-        page_text = text if (text and len(text.strip()) > 120) else ''
-        if not page_text:
-            try:
-                page_text, src_kind = ocr_page(data, i), 'OCR'
-            except Exception as e:
-                recs.append(dict(name=None, source=f'page {i+1}, unreadable: {str(e)[:70]}'))
-                continue
-        base = parse_text_paycheck(page_text)
-        need = [k for k in ('name', 'federal', 'net_pay', 'taxable_wages', 'medicare_gross') if base.get(k) is None]
-        used_model = False
-        if need:
-            for attempt in (1, 2):
-                try:
-                    for r in groq_client.structure_paycheck_text(page_text, hint=hint):
-                        cand = dict(name=r.get('employee_name'), employee_id=r.get('employee_id'),
-                                    gross=num(r.get('gross')), federal=num(r.get('federal_withholding')),
-                                    state=num(r.get('state_withholding')), state_code=r.get('state_code'),
-                                    social_security=num(r.get('social_security')), medicare=num(r.get('medicare')),
-                                    taxable_wages=num(r.get('taxable_wages')), medicare_gross=num(r.get('medicare_gross')),
-                                    net_pay=num(r.get('net_pay')), premium=num(r.get('premium_pretax')),
-                                    reimbursement=num(r.get('reimbursement')), fee=num(r.get('employee_fee_aftertax')),
-                                    product=num(r.get('product_sold')), retirement=num(r.get('retirement')),
-                                    cafeteria=num(r.get('cafeteria_pretax')), other_deductions=num(r.get('other_deductions')))
-                        merged = dict(cand)
-                        for k, v in base.items():          # the regex reading wins wherever it found a value
-                            if v is not None:
-                                merged[k] = v
-                        used_model = True
-                        if merged.get('name') or merged.get('employee_id'):
-                            merged['source'] = f'page {i+1}, {src_kind}, model filled'
-                            recs.append(merged)
-                    if used_model and recs and (recs[-1].get('name') or recs[-1].get('employee_id')):
-                        break
-                except Exception as e:
-                    if attempt == 2:
-                        recs.append(dict(**base, source=f'page {i+1}, {src_kind}, model unavailable: {str(e)[:60]}'))
-        if not used_model and (base.get('name') or base.get('employee_id')):
-            base['source'] = f'page {i+1}, {src_kind}'
-            recs.append(base)
+            progress(done[0], len(pages))
+        return out
+
+    with ThreadPoolExecutor(max_workers=max(1, min(workers, len(pages) or 1))) as ex:
+        batches = list(ex.map(work, list(enumerate(pages))))
+    recs = [r for b in batches for r in b]
     return [r for r in recs if r.get('name') or r.get('employee_id') or r.get('federal') is not None]
 
 

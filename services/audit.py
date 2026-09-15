@@ -202,14 +202,21 @@ def _attribute(emp: EmployeeAudit) -> list:
                            'Federal withholding reaches zero after the premium: the deduction returns all of it and no more '
                            'is available.'))
     identity_broken = emp.identity_gap is not None and abs(emp.identity_gap) > 2.0
-    if identity_broken:
+    # A broken identity means either a line was misread or something outside the premium moved. Tell them apart by
+    # whether every line the identity needs was actually printed and read: if one was supplied from elsewhere or
+    # dropped as implausible, the reading is what is in doubt, and the employee is reported as unverified.
+    incomplete = (not getattr(emp, 'fee_from_statement', False)
+                  or b.federal_unreliable is not None or a.federal_unreliable is not None
+                  or any(getattr(pc, k) is None for pc in (b, a)
+                         for k in ('gross', 'net_pay', 'federal', 'social_security', 'medicare')))
+    if identity_broken and incomplete:
         out.append(Finding('Statement lines inconsistent', emp.identity_gap,
                            'The withholding savings plus the FICA savings less the fee does not equal the net pay change '
                            'on these statements, so at least one printed line could not be read reliably'
                            + ('' if getattr(emp, 'fee_from_statement', False) else ', and the employee fee was taken from the '
                               'proposal because no after-tax fee line was found') +
                            '. Treat this employee\'s figures as unverified and check the statement by hand.'))
-    elif emp.federal_gap is not None and abs(emp.federal_gap) > CENT:
+    if not (identity_broken and incomplete) and emp.federal_gap is not None and abs(emp.federal_gap) > CENT:
         out.append(Finding('Federal withholding tables', emp.federal_gap,
                            'The engine and the payroll provider hold different withholding tables, which moves the saving '
                            'where the premium falls across a rate boundary. This is a configuration difference, not a '
@@ -229,7 +236,11 @@ def _attribute(emp: EmployeeAudit) -> list:
         out.append(Finding('Non-tax line in net pay', emp.identity_gap,
                            'The net pay change does not equal the tax savings less the fee. A deduction or an earning '
                            'other than the premium changed between the two paychecks.'))
-    if not out:
+    if not out and emp.before.net_pay is None and emp.after.net_pay is None:
+        out.append(Finding('Statement not provided', None,
+                           'No payroll statement in the uploaded packs matched this employee, so there is nothing to '
+                           'reconcile the engine against. This is a coverage limit of the files, not a finding.'))
+    elif not out:
         out.append(Finding('Unattributed', emp.allotment_gap,
                            'The available files do not explain this difference. The paycheck lines needed for the '
                            'reconciliation are missing or unreadable.'))
@@ -239,6 +250,8 @@ def _attribute(emp: EmployeeAudit) -> list:
 def _verdict(emp: EmployeeAudit):
     g = emp.allotment_gap
     if g is None:
+        if emp.before.net_pay is None and emp.after.net_pay is None:
+            return 'No statement in the uploaded packs', 'grey'
         return 'Not reconciled, data missing', 'grey'
     if abs(g) <= CENT:
         return 'Engine matches payroll', 'green'
@@ -262,12 +275,13 @@ def summarise(audits: list) -> dict:
     by_cause = {}
     for a in audits:
         for f in a.findings:
-            if f.label in ('Match',):
+            if f.label in ('Match', 'Statement not provided'):
                 continue
             c = by_cause.setdefault(f.label, {'employees': 0, 'amount': 0.0})
             c['employees'] += 1
             c['amount'] = r2(c['amount'] + (f.amount or 0))
-    return dict(employees=n, matched=len(matched), attributed=len(attributed), unexplained=len(unexplained),
+    covered = [a for a in audits if a.allotment_gap is not None]
+    return dict(covered=len(covered), employees=n, matched=len(matched), attributed=len(attributed), unexplained=len(unexplained),
                 data_missing=len(missing), total_gap=r2(sum(gaps)) if gaps else None,
                 decreases=len([a for a in audits if (a.actual_net_change or 0) < 0]),
                 causes=sorted(by_cause.items(), key=lambda kv: -abs(kv[1]['amount'])))
