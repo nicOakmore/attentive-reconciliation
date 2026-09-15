@@ -366,8 +366,40 @@ def parse_text_paycheck(text):
     m = re.search(r'emp(?:loyee)?\s*(?:nbr|no|#|id)[:.]?\s*\|?\s*(\w{2,12})', text, re.I)
     if m:
         out['employee_id'] = m.group(1)
-    if out.get('net_pay') is None:
-        out['net_pay'] = _deposit_total(text)
+    # Net pay is printed three times over: on its own line, as the direct deposit total, and as gross less total
+    # deductions. A scan that misreads one digit disagrees with itself, so take the value two sources agree on.
+    cands = []
+    if out.get('net_pay') is not None:
+        cands.append(('line', out['net_pay']))
+    dep = _deposit_total(text)
+    if dep is not None:
+        cands.append(('deposit', dep))
+    if out.get('gross') is not None and out.get('total_deductions') is not None:
+        cands.append(('gross less deductions', r2(out['gross'] - out['total_deductions'])))
+    agreed = None
+    for i, (_, v) in enumerate(cands):
+        if any(abs(v - w) <= 0.02 for j, (_, w) in enumerate(cands) if j != i):
+            agreed = v
+            break
+    if agreed is not None:
+        if out.get('net_pay') is not None and abs(out['net_pay'] - agreed) > 0.02:
+            out['net_pay_corrected'] = f"net pay read as {out['net_pay']:.2f} disagreed with the other two printings, " \
+                                       f"taken as {agreed:.2f}"
+        out['net_pay'] = agreed
+    elif out.get('net_pay') is None and dep is not None:
+        out['net_pay'] = dep
+    elif len(cands) > 1:
+        # No two printings agree. Net pay is a large fraction of gross, so if exactly one candidate can be a net
+        # pay at all, that is the reading; otherwise say the line is unreliable rather than guess.
+        g = out.get('gross')
+        fits = [v for _, v in cands if g and 0.25 * g <= v <= g] if g else []
+        if len(fits) == 1:
+            if out.get('net_pay') is not None and abs(out['net_pay'] - fits[0]) > 0.02:
+                out['net_pay_corrected'] = (f"net pay read as {out['net_pay']:.2f} cannot be a net pay against gross "
+                                            f"{g:.2f}, taken as {fits[0]:.2f} from the deposit total")
+            out['net_pay'] = fits[0]
+        else:
+            out['net_pay_unreliable'] = [v for _, v in cands]
     if out.get('taxable_wages') is None and out.get('medicare_gross') is not None and out.get('retirement'):
         # A retirement reduction lowers federal taxable wages and leaves Medicare wages alone, so the taxable wages
         # line can be recovered when the scan loses it.
