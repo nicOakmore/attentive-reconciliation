@@ -149,6 +149,7 @@ LINE_PATTERNS = {
  'medicare': [r'medicare tax', r'^med$', r'\bmed\b'],
  'taxable_wages': [r'taxable wages'],
  'medicare_gross': [r'medicare gross'],
+ 'fica_gross': [r'fica gross'],
  'net_pay': [r'n[eo0]t\s*pay', r'net\s*chec?k'],   # OCR reads Net Pay as Not Pay on scanned packs
  'retirement': [r'trs salary red', r'403\(?b\)?', r'457', r'retirement'],
  'premium': [r'pcm pretax', r'pcmpt', r'pcmp pre tax', r'premium'],
@@ -426,6 +427,7 @@ COMPACT_PATTERNS = {
  'medicare': [r'med[il1]caretax', r'med[il1]?cerotax', r'med[a-z]{0,3}caretax'],
  'taxable_wages': [r'taxab[li]ewages'],
  'medicare_gross': [r'med[il1]caregross', r'med[a-z]{0,3}caregross'],
+ 'fica_gross': [r'f[il1]cagross'],
  'net_pay': [r'n[eo]t?pay', r'netchec?k'],
  'retirement': [r'trssa[li]aryred', r'403b', r'457', r'ret[il1]rement'],
  'retirement_insurance': [r'trs[il1]nsurance'],
@@ -531,11 +533,36 @@ def parse_text_paycheck(text):
         # No two printings agree, so no value is inferred: the employee is reported unverified instead.
         out['net_pay_unreliable'] = [v for _, v in cands]
         out['net_pay'] = None
+    # Social Security tax cannot exceed 6.2 per cent of the Social Security wages the statement itself prints, and
+    # where those wages are zero the tax is zero. That is the statement's own arithmetic, not an assumption, and it
+    # catches the common scan error of reading a figure from the deduction table printed beside the tax lines.
+    fg = out.get('fica_gross')
+    if fg is not None:
+        ss = out.get('social_security')
+        if fg == 0:
+            if ss not in (None, 0):
+                out['social_security_corrected'] = (f'Social Security tax read as {ss:.2f} against Social Security '
+                                                    f'wages of 0.00 on the same statement, read as 0.00')
+            out['social_security'] = 0.0
+        elif ss is not None and ss > fg * 0.0625 + 0.02:
+            out['social_security_corrected'] = (f'Social Security tax read as {ss:.2f} exceeds 6.2 per cent of the '
+                                                f'{fg:.2f} Social Security wages printed on the same statement')
+            out['social_security'] = None
     fed = _federal_from_deductions(out)
     if fed is not None:
         if out.get('federal') is None:
             out['federal'] = fed
             out['federal_derived'] = True
+        elif abs(out['federal'] - fed) > 0.02 and _is_another_line(out, out['federal']):
+            # The withholding line on these statements is printed beside the deduction table, and the scan sometimes
+            # reads a figure from that table instead. Where the value read is exactly one of the other lines on the
+            # same statement, the reading is rejected in favour of the corroborated deduction arithmetic.
+            out['federal_corrected'] = (f"federal withholding read as {out['federal']:.2f} is the figure printed on "
+                                        f"another line of the same statement; the deduction total, which ties to "
+                                        f"gross less net pay, leaves {fed:.2f}")
+            out['federal'] = fed
+        elif abs(out['federal'] - fed) > 0.02:
+            out['federal_check'] = f'deduction total implies {fed:.2f}'
         # A disagreement between the withholding line and the printed deduction total is not by itself evidence of
         # a misreading: the totals block prints its own subtotals and the scan reads those columns unevenly. The
         # net pay identity is the check that decides whether an employee is reported as verified.
@@ -566,17 +593,29 @@ def _w4_from_statement(text):
     return out
 
 
+def _is_another_line(out, v):
+    """Is this figure one of the other amounts printed on the statement, which is how a column misread shows up."""
+    for k in ('premium', 'fee', 'reimbursement', 'product', 'retirement', 'retirement_insurance', 'other_total',
+              'medicare', 'social_security'):
+        w = out.get(k)
+        if w is not None and w != 0 and abs(abs(w) - abs(v)) <= 0.02:
+            return True
+    return False
+
+
 def _federal_from_deductions(out):
-    """The statement prints every deduction and their total, so federal withholding is the total less the rest.
-    That arithmetic is printed on the page, which makes it a check on the scan rather than an assumption."""
-    total = out.get('total_deductions')
-    if total is None:
+    """Federal withholding is the printed deduction total less the other printed deductions. The derivation is only
+    used where the printed total itself ties to gross less net pay, which means the total and the net pay corroborate
+    each other and the remainder is the withholding. On these scans the withholding line often sits beside the
+    deduction table and the scan reads a figure from the wrong column, so this arithmetic is the better evidence."""
+    total, gross, net = out.get('total_deductions'), out.get('gross'), out.get('net_pay')
+    if total is None or out.get('medicare') is None or out.get('other_total') is None:
         return None
+    if gross is None or net is None or abs((gross - net) - total) > 0.02:
+        return None                      # the printed total is not corroborated, so do not derive from it
     parts = [out.get(k) for k in ('social_security', 'medicare', 'retirement', 'retirement_insurance', 'other_total')]
-    if out.get('medicare') is None or out.get('other_total') is None:
-        return None
     v = r2(total - sum(x or 0 for x in parts))
-    return v if -0.01 <= v <= total else None
+    return v if -0.01 <= v <= gross * 0.45 else None
 
 
 def _deposit_rows(text):
