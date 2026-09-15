@@ -243,7 +243,13 @@ def _rapid_engine():
             if _RAPID[0] is None:
                 try:
                     from rapidocr_onnxruntime import RapidOCR
-                    _RAPID[0] = RapidOCR()
+                    # One inference thread per engine: several pages are read at once, and letting each of them
+                    # grab every core makes the whole container thrash instead of finishing pages.
+                    n = int(os.environ.get('OCR_THREADS', '1'))
+                    try:
+                        _RAPID[0] = RapidOCR(intra_op_num_threads=n, inter_op_num_threads=n)
+                    except TypeError:
+                        _RAPID[0] = RapidOCR()
                 except Exception:
                     _RAPID[0] = False
     return _RAPID[0] or None
@@ -639,9 +645,9 @@ def paychecks_from_pdf(data: bytes, hint='', max_pages=200, progress=None, worke
     network, and a pack of eighty statements is otherwise almost all waiting."""
     from concurrent.futures import ThreadPoolExecutor
     if workers is None:
-        # Each page in flight holds a rendered bitmap and a tesseract process. Six at a time suits the 2 CPU, 4 GB
-        # instance; the 512 MiB instance was OOM killed at eight, so keep this in step with the plan.
-        workers = int(os.environ.get('PDF_WORKERS', '6'))
+        # One page in flight per CPU. The OCR engine is compute bound and pinned to a single thread, so more pages
+        # at once only adds contention; the 512 MiB instance was also OOM killed at eight.
+        workers = int(os.environ.get('PDF_WORKERS', '2'))
     pages = pdf_pages_text(data) or []
     if not pages:
         try:
