@@ -317,6 +317,11 @@ def build(audits, summary, notes, client='', files=None, ai_paragraph='', period
             'reconciled independently of the tax lines. A cause is reported only where the submitted data '
             'establishes it, and an employee the data does not settle is reported unverified rather than assigned a '
             'reconciliation.', size=9, color=GREY, space_after=8)
+    pop0 = summary.get('population') or {}
+    _p(doc, f"On this payroll pack, {pop0.get('both', 0)} of {summary['employees']} employees have an accepted net "
+            f"pay value on both statements; {summary.get('unverified', 0)} of those {pop0.get('both', 0)} are "
+            f"reported unverified because the independent payroll identity does not tie, and no payroll value is "
+            f"overridden solely to force a reconciliation.", space_after=10)
     _p(doc, 'Population and matching', size=12, bold=True, color=NAVY, space_after=4)
     pop = summary.get('population') or {}
     _table(doc, ['Control', 'Count'],
