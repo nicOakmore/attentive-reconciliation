@@ -52,6 +52,7 @@ class Paycheck:
     retirement_line: Optional[bool] = None    # the statement prints a retirement reduction line
     net_pay_corrected: Optional[str] = None
     net_pay_unreliable: Optional[list] = None
+    net_pay_disputed: Optional[dict] = None
     source: str = ''
 
 
@@ -125,6 +126,7 @@ class EmployeeAudit:
     findings: list = field(default_factory=list)
     verdict: str = ''
     verdict_class: str = ''
+    uncertainty: Optional[dict] = None
     narrative: str = ''
     fee_from_statement: bool = False
 
@@ -180,7 +182,128 @@ def audit_employee(emp: EmployeeAudit) -> EmployeeAudit:
 
     emp.findings = _attribute(emp)
     emp.verdict, emp.verdict_class = _verdict(emp)
+    emp.uncertainty = _uncertainty(emp)
+    if emp.uncertainty:
+        for st in (emp.uncertainty.get('statements') or []):
+            for nm, r in (st.get('residuals') or {}).items():
+                if 'exceed gross less net pay' in nm:
+                    emp.findings.append(Finding(
+                        'Statement lines cannot all be right', r2(r),
+                        f"On the {st['statement']} statement the deduction lines read add to {_m(r)} more than the "
+                        f"difference between gross pay and net pay. That is impossible on a single statement, so at "
+                        f"least one of those lines was not read as printed. The employee is reported unverified and "
+                        f"the lines are listed for checking."))
+    if emp.uncertainty and emp.uncertainty.get('cross_document'):
+        for d in emp.uncertainty['cross_document'].get('disagreements', []):
+            for item in d['items']:
+                emp.findings.append(Finding(
+                    'Statement disagrees with another document',
+                    r2(item['read'] - item['expected']),
+                    f"On the {d['statement']} statement the {item['field'].replace('_', ' ')} line reads "
+                    f"{_m(item['read'])} where {item['source']} implies {_m(item['expected'])}. Neither document is "
+                    f"assumed correct: this is a disagreement between the payroll, the census and the proposal, and "
+                    f"it is reported as one."))
     return emp
+
+
+def _cross_document(emp):
+    """What the census and the proposal say about this employee's statements, and where a reading disagrees.
+
+    Only the figures those documents supply as inputs are used. The proposal's own withholding, taxable income,
+    savings and allotment are the subject of the audit and cannot test themselves.
+    """
+    try:
+        from . import crossdoc as X
+    except Exception:
+        return None, {}
+    out, exps = {}, {}
+    for tag, pc, which in (('before', emp.before, 'before'), ('after', emp.after, 'after')):
+        exp = X.expectations(emp.census, emp.engine, emp.pay_periods, which=which)
+        exps[which] = exp
+        rec = {f: getattr(pc, f, None) for f in
+               ('gross', 'federal', 'state', 'social_security', 'medicare', 'retirement', 'net_pay',
+                'taxable_wages', 'medicare_gross', 'premium', 'fee', 'reimbursement')}
+        dis = X.disagreements(rec, exp)
+        if dis:
+            out.setdefault('disagreements', []).append(dict(statement=tag, items=dis))
+    return (out or None), exps
+
+
+def _uncertainty(emp):
+    """What the reading uncertainty implies, where the statements do not tie. Nothing here changes a figure: it
+    says which printed line is most likely the one at fault, what it was most likely printed as, and how wide the
+    conclusion is once the reading error is carried through."""
+    if emp.identity_gap is None or abs(emp.identity_gap) <= 2.0:
+        return None
+    try:
+        from . import estimate as E
+    except Exception:
+        return None
+    out = {}
+    cross, exps = _cross_document(emp)
+    if cross:
+        out['cross_document'] = cross
+    try:
+        for tag, pc in (('before', emp.before), ('after', emp.after)):
+            rec = {f: getattr(pc, f, None) for f in E.FIELDS}
+            fit = E.solve(rec)
+            derived = E.fill_derived(rec, expectations=exps.get(tag))
+            if derived:
+                out.setdefault('derived', []).append(dict(statement=tag, fields={
+                    k: dict(value=v['value'], identity=v['identity']) for k, v in derived.items()}))
+            suspects = sorted(((f, p) for f, p in fit.outlier.items() if p >= 0.5), key=lambda t: -t[1])[:2]
+            if not suspects:
+                continue
+            entry = dict(statement=tag, residuals={k: v for k, v in fit.residuals.items() if abs(v) > 0.05},
+                         suspects=[dict(field=f, probability=p) for f, p in suspects])
+            top = suspects[0][0]
+            post = E.most_likely_reading(rec, top, expectations=exps.get(tag))
+            if post.get('posterior'):
+                entry['most_likely'] = dict(field=top, observed=post.get('observed'),
+                                            readings=post['posterior'][:3])
+            out.setdefault('statements', []).append(entry)
+        # The conclusion as a fuzzy number: where a figure could not be pinned, the gap is a range with a degree
+        # of support rather than a single number nobody can defend. Crisp readings give a crisp gap.
+        try:
+            from . import fuzzy as FZ
+            fuzzy_fields = {}
+            for tag, pc in (('before', emp.before), ('after', emp.after)):
+                for st in (out.get('statements') or []):
+                    if st['statement'] != tag:
+                        continue
+                    ml = st.get('most_likely') or {}
+                    if ml.get('field') and ml.get('readings'):
+                        fuzzy_fields[(tag, ml['field'])] = FZ.from_posterior(ml.get('observed'), ml['readings'])
+            nb = fuzzy_fields.get(('before', 'net_pay')) or FZ.Fuzzy.crisp(emp.before.net_pay or 0.0)
+            na = fuzzy_fields.get(('after', 'net_pay')) or FZ.Fuzzy.crisp(emp.after.net_pay or 0.0)
+            if emp.before.net_pay is not None and emp.after.net_pay is not None and emp.engine.allotment is not None:
+                change = (na - nb) * (emp.pay_periods / 12.0)
+                gap = change - emp.engine.allotment
+                out['fuzzy_gap'] = dict(gap.as_dict(),
+                                        confidence=FZ.confidence(gap),
+                                        support_that_the_gap_is_negative=FZ.support_for(gap, 0.0, 'below'),
+                                        note='a range where a figure could not be pinned to one reading, with the '
+                                             'degree to which the reading supports it')
+        except Exception:
+            pass
+        if emp.engine.allotment is not None:
+            b = {f: getattr(emp.before, f, None) for f in E.FIELDS}
+            a = {f: getattr(emp.after, f, None) for f in E.FIELDS}
+            a['product'] = emp.after.product
+            # the chance each reading is the wrong one, taken from the fit, so the interval widens exactly where
+            # the statement is in doubt and stays tight where it is not
+            outl = {}
+            for tag, pc in (('b', emp.before), ('a', emp.after)):
+                f = E.solve({k: getattr(pc, k, None) for k in E.FIELDS})
+                for name, p in f.outlier.items():
+                    outl[(tag, name)] = p
+            iv = E.gap_interval(b, a, emp.engine.allotment, pay_periods=emp.pay_periods, draws=20000,
+                                outliers=outl)
+            if iv.get('median') is not None:
+                out['gap_interval'] = iv
+    except Exception as e:
+        return dict(note=f'uncertainty analysis unavailable: {type(e).__name__}')
+    return out or None
 
 
 def _expected_other_change(b, a):
@@ -263,6 +386,15 @@ def _attribute(emp: EmployeeAudit) -> list:
                            'payroll line changed.'))
     # A movement in the statement's own "other deductions" total is not used as evidence here: on a scanned pack
     # that total is one of the least reliably read figures, and an untied identity is reported as such instead.
+    for tag, pc in (('before', b), ('after', a)):
+        d = getattr(pc, 'net_pay_disputed', None)
+        if d:
+            out.append(Finding('Net pay printings disagree', d.get('difference'),
+                               f"On the {tag} statement the line labelled net pay reads {_m(d.get('line'))} while "
+                               f"the rest of the page gives {_m(d.get('corroborated'))} "
+                               f"({', '.join(d.get('sources') or [])}). The figure used is the corroborated one and "
+                               f"the employee is reported unverified: choosing between two printed figures is not "
+                               f"something this tool does silently."))
     identity_broken = emp.identity_gap is not None and abs(emp.identity_gap) > 2.0
     explained = any(f.label == 'Other changed earning or deduction'
                     and f.amount is not None and abs(abs(f.amount) - abs(emp.identity_gap or 0)) <= 2.0
@@ -317,6 +449,10 @@ def _verdict(emp: EmployeeAudit):
         return 'Engine matches payroll', 'green'
     if any(f.label == 'Unattributed' for f in emp.findings):
         return 'Difference not attributed', 'red'
+    if any(f.label == 'Net pay printings disagree' for f in emp.findings):
+        return 'Net pay printings disagree, unverified', 'red'
+    if any(f.label == 'Statement lines cannot all be right' for f in emp.findings):
+        return 'Statement lines cannot all be right, unverified', 'red'
     if any(f.label == 'Statement identity does not tie' for f in emp.findings):
         return 'Statement identity does not tie, unverified', 'red'
     if emp.actual_net_change is not None and emp.actual_net_change < 0:

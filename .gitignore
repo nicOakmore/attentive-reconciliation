@@ -4,3 +4,4 @@ __pycache__/
 samples/
 .env.local
 format_guidance.txt
+.pagestore/

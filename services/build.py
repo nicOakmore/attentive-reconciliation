@@ -27,6 +27,8 @@ def run(census_bytes=None, report_bytes=None, before=None, after=None, before_na
         _, report_recs, t = P.read_table(report_bytes, P.REPORT_WANTED, sheet_hint='savings')
         notes.append(f'Proposal report: {len(report_recs)} rows from sheet "{t}"')
 
+    store_stats = {}
+
     def payroll(blob, label):
         if not blob:
             return []
@@ -35,7 +37,8 @@ def run(census_bytes=None, report_bytes=None, before=None, after=None, before_na
             recs = P.paychecks_from_sheet(data)
             notes.append(f'{label}: {len(recs)} rows from spreadsheet {fname}')
         else:
-            recs = P.paychecks_from_pdf(data, hint=label, progress=progress)
+            recs = P.paychecks_from_pdf(data, hint=label, progress=progress, source_name=fname,
+                                        store_stats=store_stats)
             modelled = sum(1 for r in recs if 'model' in (r.get('source') or ''))
             notes.append(f'{label}: {len(recs)} statements read from {fname}'
                          + (f', of which {modelled} needed the model to locate a line' if modelled else ''))
@@ -102,6 +105,17 @@ def run(census_bytes=None, report_bytes=None, before=None, after=None, before_na
                      f'in the proposal report or census, and were excluded from the reconciliation')
     matched_both = sum(1 for a in audits if a.before.net_pay is not None and a.after.net_pay is not None)
     notes.append(f'{matched_both} of {len(audits)} employees were matched to both a before and an after statement')
+    if store_stats:
+        parts = []
+        if store_stats.get('read'): parts.append(f"{store_stats['read']} read from the page")
+        if store_stats.get('exact'): parts.append(f"{store_stats['exact']} served from the page store")
+        if store_stats.get('equivalent'):
+            parts.append(f"{store_stats['equivalent']} served from the store on an equivalent page match")
+        if parts:
+            notes.append('Statement pages: ' + ', '.join(parts))
+    corrected = [a for a in audits if 'corrected by' in ((a.before.source or '') + (a.after.source or ''))]
+    if corrected:
+        notes.append(f'{len(corrected)} employees carry a recorded human correction to a figure on their statement')
     summary = summarise(audits)
     summary['population']['unmatched_statements'] = len(orphan_b) + len(orphan_a)
     return audits, summary, notes

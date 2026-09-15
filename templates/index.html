@@ -214,13 +214,54 @@ function render(d) {
   document.getElementById('out').innerHTML = h;
 }
 
+function uncertainty(e) {
+  const u = e.uncertainty;
+  if (!u) return '';
+  let h = '<div class="detail-section"><h4>Uncertainty analysis, modelled</h4>';
+  (u.statements || []).forEach(st => {
+    const s = (st.suspects || []).map(x => x.field.replace(/_/g, ' ') + ' ' + Math.round(x.probability * 100) + '%').join(', ');
+    h += '<div class="sentence">On the ' + st.statement + ' statement the line least consistent with the others is ' + s + '.';
+    const ml = st.most_likely;
+    if (ml && ml.readings && ml.readings.length) {
+      h += ' Read as ' + money(ml.observed) + '; the most likely printed value under the reading model is ' +
+           money(ml.readings[0].value) + ' at ' + Math.round(ml.readings[0].probability * 100) + '%' +
+           (ml.decisive ? '' : ', which the evidence does not settle') + '.';
+    }
+    h += '</div>';
+  });
+  if (u.fuzzy_gap) {
+    h += '<div class="sentence">Gap as a range where a figure could not be pinned: ' + money(u.fuzzy_gap.low) +
+         ' to ' + money(u.fuzzy_gap.high) + ', most likely ' + money(u.fuzzy_gap.mid) +
+         ' (reading confidence ' + u.fuzzy_gap.confidence + ').</div>';
+  }
+  if (u.gap_interval) {
+    h += '<div class="sentence">Carrying the reading error through: modelled 95% interval ' +
+         money(u.gap_interval.low) + ' to ' + money(u.gap_interval.high) + ', median ' + money(u.gap_interval.median) +
+         '; chance the gap exceeds ' + money(u.gap_interval.materiality) + ' either way is ' +
+         Math.round(u.gap_interval.probability_beyond_materiality * 100) + '%. Modelled, not a payroll figure.</div>';
+  }
+  (u.derived || []).forEach(d => {
+    h += '<div class="sentence">On the ' + d.statement + ' statement these figures were not printed clearly and ' +
+         'follow from the page\'s own arithmetic: ' +
+         Object.keys(d.fields).map(k => k.replace(/_/g, ' ') + ' ' + money(d.fields[k].value)).join(', ') +
+         '. Reported as derived, not as read.</div>';
+  });
+  ((u.cross_document || {}).disagreements || []).forEach(d => {
+    d.items.forEach(it => {
+      h += '<div class="sentence">The ' + it.field.replace(/_/g, ' ') + ' line on the ' + d.statement +
+           ' statement reads ' + money(it.read) + ' where ' + it.source + ' implies ' + money(it.expected) + '.</div>';
+    });
+  });
+  return h + '</div>';
+}
+
 function box(n, l, cls) { return '<div class="summary-box ' + (cls || '') + '"><div class="num">' + n + '</div><div class="lbl">' + l + '</div></div>'; }
 
 function detail(e) {
   const b = e.before, a = e.after, en = e.engine, c = e.census, pp = e.pay_periods;
   let h = '<div class="detail-panel">';
   h += '<div class="verdict"><b>Verdict.</b> ' + e.verdict + '</div>';
-  h += '<div class="detail-section"><h4>Census input</h4><div class="sentence">' +
+  h += uncertainty(e) + '<div class="detail-section"><h4>Census input</h4><div class="sentence">' +
        'Census pre-tax total ' + money((c.pretax_other || 0) + (c.group_health || 0) + (c.retirement_401k || 0)) +
        (c.pretax_other !== null && c.pretax_other !== undefined ? ' (field Q ' + money(c.pretax_other) + ')' : '') +
        (e.retirement_not_in_census ? '. Payroll reduces federal taxable wages by a further ' + money(e.retirement_not_in_census) + ' a month for retirement, not carried in any census field.' : '.') +

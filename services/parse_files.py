@@ -1,7 +1,7 @@
 """File ingestion. Spreadsheets are read deterministically. Payroll PDFs are read as text when the PDF carries text,
 and through Groq vision when the pages are scans. Nothing here computes a saving.
 """
-import io, threading, re, os, unicodedata, time as _time
+import io, threading, re, os, unicodedata, hashlib, time as _time
 import openpyxl
 from . import groq_client
 from .audit import Census, Engine, Paycheck, EmployeeAudit, r2
@@ -238,25 +238,39 @@ _RAPID_ERROR = ['']
 _RAPID_LOCK = threading.Lock()
 
 
+_RAPID_LOCAL = threading.local()
+
+
 def _rapid_engine():
-    """RapidOCR reads these scans far more accurately than tesseract, which misreads leading digits on them."""
-    if _RAPID[0] is None:
-        with _RAPID_LOCK:
-            if _RAPID[0] is None:
-                try:
-                    from rapidocr_onnxruntime import RapidOCR
-                    _RAPID_ERROR[0] = ''
-                    # One inference thread per engine: several pages are read at once, and letting each of them
-                    # grab every core makes the whole container thrash instead of finishing pages.
-                    n = int(os.environ.get('OCR_THREADS', '1'))
-                    try:
-                        _RAPID[0] = RapidOCR(intra_op_num_threads=n, inter_op_num_threads=n)
-                    except TypeError:
-                        _RAPID[0] = RapidOCR()
-                except Exception as e:
-                    _RAPID_ERROR[0] = f'{type(e).__name__}: {e}'[:300]
-                    _RAPID[0] = False
-    return _RAPID[0] or None
+    """The OCR engine, one per thread.
+
+    One shared engine across threads segmentation faults: the runtime session is not safe to call concurrently.
+    A session per thread costs memory and nothing else, and the number of threads is bounded by the number of
+    pages read at once, which is bounded by the CPUs.
+    """
+    eng = getattr(_RAPID_LOCAL, 'engine', None)
+    if eng is not None:
+        return eng or None
+    try:
+        from rapidocr_onnxruntime import RapidOCR
+        n = int(os.environ.get('OCR_THREADS', '1'))
+        # The engine's own text angle classifier runs on every box and costs more than the reading itself: on these
+        # pages it more than doubled the time per page and read nothing better, and the orientation of a page is
+        # settled once for the whole pack anyway. Detection at a smaller side length is the other large saving,
+        # measured to read the same figures.
+        opts = dict(intra_op_num_threads=n, inter_op_num_threads=n,
+                    use_cls=os.environ.get('OCR_USE_CLS', '0') == '1',
+                    det_limit_side_len=int(os.environ.get('OCR_DET_SIDE', '576')))
+        try:
+            eng = RapidOCR(**opts)
+        except TypeError:
+            eng = RapidOCR()
+        _RAPID_ERROR[0] = ''
+    except Exception as e:
+        _RAPID_ERROR[0] = f'{type(e).__name__}: {e}'[:300]
+        eng = False
+    _RAPID_LOCAL.engine = eng
+    return eng or None
 
 
 def _rapid_read(png):
@@ -444,9 +458,27 @@ def _compact(line):
     return re.sub(r'[^a-z0-9]', '', line.lower())
 
 
-def _first_amount(line):
-    """The this period column is the first amount printed after the label, so take that one."""
-    body = line.split(':', 1)[1] if ':' in line else line
+def _first_amount(line, pats=None):
+    """The amount printed immediately after this label.
+
+    Splitting the line on its first colon is wrong when a line crosses two tables: the first colon can belong to
+    another table's label and the amount taken then belongs to that table. So the label itself is located in the
+    line, by matching the patterns against a squeezed form of a sliding window, and the amount taken is the first
+    one after where the label ends.
+    """
+    start = 0
+    if pats:
+        squeeze = lambda t: re.sub(r'[^a-z0-9]', '', t.lower())
+        best = None
+        for m in re.finditer(r'[A-Za-z][A-Za-z ./()\-]{2,40}', line):
+            if any(re.search(p, squeeze(m.group(0))) for p in pats):
+                best = m.end()
+                break
+        if best is not None:
+            start = best
+    body = line[start:]
+    if start == 0 and ':' in body:
+        body = body.split(':', 1)[1]
     for m in NUM.finditer(body):
         v = num(m.group(0))
         if v is not None:
@@ -471,8 +503,13 @@ def _amount_for(line, label_match):
     return hits[0][1]
 
 
-def parse_text_paycheck(text):
-    """Pull the lines the audit needs out of a statement's text, by label."""
+def parse_text_paycheck(text, geometry=None):
+    """Pull the lines the audit needs out of a statement's text, by label, then corroborate them.
+
+    `geometry` is the reading produced from the word boxes. Where geometry establishes a figure from the label's own
+    row, block and amount column, that figure is the evidence and it wins: reading a line from the text alone
+    cannot tell an amount in the neighbouring table from the amount belonging to the label.
+    """
     out = {}
     for field, pats in LINE_PATTERNS.items():
         for line in text.split('\n'):
@@ -491,7 +528,7 @@ def parse_text_paycheck(text):
             c = _compact(line)
             if not any(re.search(p, c) for p in pats):
                 continue
-            v = _first_amount(line)
+            v = _first_amount(line, pats)
             if v is not None:
                 out[field] = v
                 break
@@ -500,60 +537,68 @@ def parse_text_paycheck(text):
         m = re.search(pat, text, re.I | re.M)
         if m:
             nm = re.split(r'\s*pay\s*[cg]am?pus|\s{3,}', m.group(1))[0].strip().rstrip(':,').strip()
-            if nm and not nm.lower().startswith(('pay campus', 'campus')):
+            if nm and not re.search(r'campus|status|filing|multi|depend|exempt|w-?4|period|date', nm, re.I):
                 out['name'] = nm
                 break
     m = re.search(r'emp(?:loyee)?\s*(?:nbr|no|#|id)[:.]?\s*\|?\s*(\w{2,12})', text, re.I)
     if m:
         out['employee_id'] = m.group(1)
+    # Geometry before text: where the boxes establish the figure in the label's own block and column, take it.
+    for name, gf in (geometry or {}).items():
+        val, method = gf.get('value'), gf.get('method')
+        if val is None or method != 'label_row_block_column':
+            continue
+        if out.get(name) is not None and abs(out[name] - val) > 0.02:
+            out.setdefault('geometry_corrections', []).append(
+                f"{name.replace('_', ' ')} read from the line as {out[name]:.2f}, taken as {val:.2f} from the "
+                f"amount column of the block the label sits in")
+        out[name] = val
+        out.setdefault('from_geometry', []).append(name)
     out.update(_w4_from_statement(text))
     # Whether the wage reduction is retirement is a question for the printed line, not for the arithmetic.
     if re.search(r'trs\s*salary\s*red|403\s*\(?b|457\b|retirement', text, re.I):
         out['retirement_line'] = True
-    # Net pay is printed three times over: on its own line, as the direct deposit total, and as gross less total
-    # deductions. Take the value two of them agree on. Failing that, trust the deposit block, which stands on its
-    # own and is not read across the deduction columns beside it.
+    # Net pay appears several times on one statement: its own line, the direct deposit total, the sum of the
+    # individual deposit rows, and gross less total deductions. They are representations of one document, not
+    # independent sources, so agreement between two of them is an extraction control and nothing more. Where two
+    # agree, the agreed figure is taken, and the figure on the line labelled net pay is preferred among equals:
+    # a deposit total can legitimately differ from net pay, because a deposit can be split or partly withheld.
     line_v = out.get('net_pay')
     dep = _deposit_total(text)
-    derived = (r2(out['gross'] - out['total_deductions'])
-               if out.get('gross') is not None and out.get('total_deductions') is not None else None)
     rows = _deposit_rows(text)
     row_sum = r2(sum(rows)) if rows else None
-    cands = [('line', line_v), ('deposit total', dep), ('gross less total deductions', derived),
-             ('sum of the deposit rows', row_sum)]
+    derived = (r2(out['gross'] - out['total_deductions'])
+               if out.get('gross') is not None and out.get('total_deductions') is not None else None)
+    cands = [('the line labelled net pay', line_v), ('gross less total deductions', derived),
+             ('the deposit total', dep), ('the sum of the deposit rows', row_sum)]
     cands = [(k, v) for k, v in cands if v is not None]
-    agreed = next((v for i, (_, v) in enumerate(cands)
-                   if any(abs(v - w) <= 0.02 for j, (_, w) in enumerate(cands) if j != i)), None)
+    agreed = None
+    for i, (k, v) in enumerate(cands):
+        if any(abs(v - w) <= 0.02 for j, (_, w) in enumerate(cands) if j != i):
+            agreed = v
+            break                          # the list is in order of preference, so the first agreeing one wins
     if agreed is not None:
         if line_v is not None and abs(line_v - agreed) > 0.02:
-            out['net_pay_corrected'] = (f"net pay read as {line_v:.2f} does not agree with the other printings of the "
-                                        f"same figure, read as {agreed:.2f}")
+            # The labelled line and the rest of the page disagree. Taking the majority would be a silent choice
+            # between two printed figures, so the majority is used for the arithmetic and the disagreement is
+            # reported: the employee is not presented as reconciled on a figure the page itself disputes.
+            out['net_pay_disputed'] = dict(line=line_v, corroborated=agreed,
+                                           difference=r2(line_v - agreed),
+                                           sources=[k for k, v in cands if abs(v - agreed) <= 0.02])
+            out['net_pay_corrected'] = (f"the line labelled net pay reads {line_v:.2f} while the rest of the page "
+                                        f"gives {agreed:.2f}; the figure used is {agreed:.2f} and the disagreement "
+                                        f"is reported")
         out['net_pay'] = agreed
     elif len(cands) > 1:
-        # No two printings agree, so no value is inferred: the employee is reported unverified instead.
         out['net_pay_unreliable'] = [v for _, v in cands]
         out['net_pay'] = None
-    # Social Security tax cannot exceed 6.2 per cent of the Social Security wages the statement itself prints, and
-    # where those wages are zero the tax is zero. That is the statement's own arithmetic, not an assumption, and it
-    # catches the common scan error of reading a figure from the deduction table printed beside the tax lines.
-    fg = out.get('fica_gross')
-    if fg is not None:
-        ss = out.get('social_security')
-        if fg == 0:
-            if ss not in (None, 0):
-                out['social_security_corrected'] = (f'Social Security tax read as {ss:.2f} against Social Security '
-                                                    f'wages of 0.00 on the same statement, read as 0.00')
-            out['social_security'] = 0.0
-        elif ss is not None and ss > fg * 0.0625 + 0.02:
-            out['social_security_corrected'] = (f'Social Security tax read as {ss:.2f} exceeds 6.2 per cent of the '
-                                                f'{fg:.2f} Social Security wages printed on the same statement')
-            out['social_security'] = None
     fed = _federal_from_deductions(out)
     if fed is not None:
         if out.get('federal') is None:
             out['federal'] = fed
             out['federal_derived'] = True
-        elif abs(out['federal'] - fed) > 0.02 and _is_another_line(out, out['federal']):
+        elif (abs(out['federal'] - fed) > 0.02 and _is_another_line(out, out['federal'])
+              and abs(fed) > 0.02 and not _shares_value(out, out['federal'])):
             # The withholding line on these statements is printed beside the deduction table, and the scan sometimes
             # reads a figure from that table instead. Where the value read is exactly one of the other lines on the
             # same statement, the reading is rejected in favour of the corroborated deduction arithmetic.
@@ -591,6 +636,19 @@ def _w4_from_statement(text):
     if m:
         out['w4_extra'] = num(m.group(1))
     return out
+
+
+def _shares_value(out, v):
+    """Is this figure also sitting in one of the deduction components the derivation subtracts.
+
+    When it is, the derivation is circular: the same misread amount appears on both sides, so a derived value of
+    nothing is an artefact of the misreading, not evidence about the withholding line.
+    """
+    for k in ('social_security', 'medicare', 'retirement', 'retirement_insurance', 'other_total'):
+        w = out.get(k)
+        if w is not None and abs(w - v) <= 0.02:
+            return True
+    return False
 
 
 def _is_another_line(out, v):
@@ -665,69 +723,246 @@ def _take_model_budget():
         return True
 
 
-def _page_record(data, i, text, hint, rot):
-    """Read one statement page. Returns a list of records (usually one)."""
-    recs = []
-    src_kind = 'text layer'
-    page_text = text if (text and len(text.strip()) > 120) else ''
-    if not page_text:
-        try:
-            page_text, src_kind = ocr_page(data, i, hint_box=rot), 'OCR'
-        except Exception as e:
-            return [dict(name=None, source=f'page {i+1}, unreadable: {str(e)[:70]}')]
+def _geometry_read(data, i, text_layer_words=None, png=None):
+    """Read the page by geometry: label gives the row, block gives the side, x position gives the column.
+
+    Returns (record fields, PageReading) or (None, None) when the page yields no words at all. The label patterns
+    are the same configurable vocabulary the text reader uses, so nothing about the layout is hard coded.
+    """
+    from . import pageread as PR
+    words = text_layer_words
+    if not words:
+        if png is None:
+            return None, None
+        words = PR.words_from_ocr(png)
+    if not words:
+        return None, None
+    labels = {k: [p for p in (LINE_PATTERNS.get(k, []) + COMPACT_PATTERNS.get(k, []))]
+              for k in set(LINE_PATTERNS) | set(COMPACT_PATTERNS)}
+    reading = PR.read_page(words, labels, prefer_column=0)
+    out = {k: f.value for k, f in reading.fields.items() if f.value is not None}
+    return out, reading
+
+
+def _page_record(data, i, text, hint, rot, source_name='', source_sha='', store_stats=None):
+    """Read one statement page once, and only once.
+
+    Order of business: establish the page's identity, ask the store whether this exact page has been read before,
+    and only then spend anything on reading it. A stored reading comes back with any human correction applied on
+    top of the machine values, and the machine values are never overwritten.
+    """
+    from . import pageread as PR
+    from . import pagestore as PS
+
+    key = PS.page_key(data, i, PR.EXTRACTOR_VERSION)
+    hit = PS.load(key)
+    kind = 'exact'
+    png = None
+    text_words = PR.words_from_text_layer(data, i)
+    if hit is None:
+        png = pdf_page_png(data, i, scale=2.8)
+        dh = PS.dhash(png)
+        dims = _png_dims(png)
+        toks = PS.identity_tokens(text or '')
+        hit = PS.find_equivalent(dh, toks, dims, PR.EXTRACTOR_VERSION)
+        kind = 'equivalent' if hit else 'miss'
+    if hit is not None:
+        rec = dict((hit.get('reading') or {}).get('record') or {})
+        eff = PS.effective_fields(hit)
+        for name, e in eff.items():
+            if e.get('verification') == 'human':
+                rec[name] = e.get('effective_value')
+                rec.setdefault('corrections_applied', []).append(
+                    f"{name.replace('_', ' ')} was corrected by {e['correction'].get('user')} to "
+                    f"{e.get('effective_value')} ({e['correction'].get('reason') or 'no reason recorded'}); the "
+                    f"machine read {e.get('machine_value')}")
+        if rec.get('name') or rec.get('employee_id'):
+            rec['source'] = (rec.get('source') or f'page {i+1}') + f', read from the page store ({kind} match)'
+            if store_stats is not None:
+                store_stats[kind] = store_stats.get(kind, 0) + 1
+            return [rec]
+
+    # not in the store: read it, once. The words carry their boxes, and the page's text is those words in lines,
+    # so the page is never put through the reader twice.
+    # Whether the page reads at all, which is all the orientation question needs. Asking whether the audit's own
+    # fields were found is a much stronger test, and paying four OCR passes on every page that happens to print
+    # fewer of them is how a five minute run became a twenty minute one.
+    def reads_ok(ws):
+        if not ws:
+            return False
+        wordish = sum(1 for w in ws if re.search(r'[A-Za-z]{3}', w.text))
+        amounts = sum(1 for w in ws if re.search(r'\d[\d,]*\.\d{2}', w.text))
+        return wordish >= 15 and amounts >= 3
+
+    try:
+        hint = rot[0] if rot and rot[0] is not None else None
+        # Only the first page of a pack pays for settling the orientation; the rest of the pack is the same way up,
+        # and a page that then reads as nothing is reported as such rather than re-read at every angle.
+        words, angle, wsrc = (text_words, 0, 'text layer') if text_words else PR.words_for_page(
+            data, i, prefer=hint, reads_ok=(reads_ok if hint is None else None))
+    except Exception as e:
+        return [dict(name=None, source=f'page {i+1}, unreadable: {str(e)[:70]}')]
+    if rot is not None:
+        rot[0] = angle                     # a pack is oriented the same way throughout, zero included
+    src_kind = wsrc
+    geo_fields, reading = _geometry_read(data, i, text_layer_words=words, png=None)
+    page_text = reading.text if reading is not None else (text or '')
     if len((page_text or '').strip()) < 40:
         return [dict(name=None, source=f'page {i+1}, no text recovered from the page')]
-    base = parse_text_paycheck(page_text)
+    geo = {k: dict(value=v.value, method=v.method, confidence=v.confidence, note=v.note)
+           for k, v in (reading.fields.items() if reading else [])}
+    base = parse_text_paycheck(page_text, geometry=geo)
     need = [k for k in ('name', 'federal', 'net_pay', 'taxable_wages', 'medicare_gross') if base.get(k) is None]
-    used_model = False
+    recs, used_model = [], False
     if need and _take_model_budget():
-        for attempt in (1, 2):
-            try:
-                for r in groq_client.structure_paycheck_text(page_text, hint=hint):
-                    cand = dict(name=r.get('employee_name'), employee_id=r.get('employee_id'),
-                                gross=num(r.get('gross')), federal=num(r.get('federal_withholding')),
-                                state=num(r.get('state_withholding')), state_code=r.get('state_code'),
-                                social_security=num(r.get('social_security')), medicare=num(r.get('medicare')),
-                                taxable_wages=num(r.get('taxable_wages')), medicare_gross=num(r.get('medicare_gross')),
-                                net_pay=num(r.get('net_pay')), premium=num(r.get('premium_pretax')),
-                                reimbursement=num(r.get('reimbursement')), fee=num(r.get('employee_fee_aftertax')),
-                                product=num(r.get('product_sold')), retirement=num(r.get('retirement')),
-                                cafeteria=num(r.get('cafeteria_pretax')), other_deductions=num(r.get('other_deductions')))
-                    merged = dict(cand)
-                    for k, v in base.items():          # the regex reading wins wherever it found a value
-                        if v is not None:
-                            merged[k] = v
-                    used_model = True
-                    if merged.get('name') or merged.get('employee_id'):
-                        merged['source'] = f'page {i+1}, {src_kind}, model filled'
-                        merged['fee_from_statement'] = merged.get('fee') is not None
-                        recs.append(merged)
-                if used_model and recs and (recs[-1].get('name') or recs[-1].get('employee_id')):
-                    break
-            except Exception as e:
-                if attempt == 2:
-                    recs.append(dict(**base, source=f'page {i+1}, {src_kind}, model unavailable: {str(e)[:60]}'))
-    if need and not used_model and (base.get('name') or base.get('employee_id')):
-        base['source'] = f'page {i+1}, {src_kind}, read by label only'
-        base['fee_from_statement'] = base.get('fee') is not None
-        return [base]
-    if not used_model and (base.get('name') or base.get('employee_id')):
-        base['source'] = f'page {i+1}, {src_kind}'
-        base['fee_from_statement'] = base.get('fee') is not None
+        try:
+            for r in groq_client.structure_paycheck_text(page_text, hint=hint):
+                cand = dict(name=r.get('employee_name'), employee_id=r.get('employee_id'),
+                            gross=num(r.get('gross')), federal=num(r.get('federal_withholding')),
+                            state=num(r.get('state_withholding')), state_code=r.get('state_code'),
+                            social_security=num(r.get('social_security')), medicare=num(r.get('medicare')),
+                            taxable_wages=num(r.get('taxable_wages')), medicare_gross=num(r.get('medicare_gross')),
+                            net_pay=num(r.get('net_pay')), premium=num(r.get('premium_pretax')),
+                            reimbursement=num(r.get('reimbursement')), fee=num(r.get('employee_fee_aftertax')),
+                            product=num(r.get('product_sold')), retirement=num(r.get('retirement')),
+                            cafeteria=num(r.get('cafeteria_pretax')), other_deductions=num(r.get('other_deductions')))
+                merged = dict(cand)
+                for k, v in base.items():                 # anything read from the page itself wins
+                    if v is not None:
+                        merged[k] = v
+                used_model = True
+                if merged.get('name') or merged.get('employee_id'):
+                    merged['source'] = f'page {i+1}, {src_kind}, model filled'
+                    recs.append(merged)
+        except Exception as e:
+            recs.append(dict(**base, source=f'page {i+1}, {src_kind}, model unavailable: {str(e)[:60]}'))
+    if not recs and (base.get('name') or base.get('employee_id')):
+        base['source'] = f'page {i+1}, {src_kind}' + (', geometry' if geo_fields else '')
         recs.append(base)
+    table = None
+    if not recs:
+        # The page is not one person's statement. Try it as a table of people, and use that reading only if it
+        # holds together arithmetically: gross less the amounts withheld should equal net pay on each row. A table
+        # reading that does not tie is not reported as figures, it is reported as a page that could not be read.
+        table, gate = _table_read(words)
+        if table is not None and gate['accepted']:
+            for r in table.employees():
+                rec = _record_from_table_row(r, i, table)
+                if rec:
+                    recs.append(rec)
+        elif table is not None:
+            return [dict(name=None, source=f'page {i+1}, {wsrc}, read as a table of {gate["rows"]} rows but the '
+                                          f'reading does not tie on {gate["does_not_tie"]} of them, so no figures '
+                                          f'are taken from it')]
+    for r in recs:
+        r['fee_from_statement'] = r.get('fee') is not None
+        r['page_key'] = key
+
+    # store what was read, with the boxes behind it, so this page is never read again
+    if recs and reading is not None:
+        try:
+            if png is None:
+                png = pdf_page_png(data, i, scale=2.8)
+            rd = reading.as_record()
+            rd['record'] = {k: v for k, v in recs[0].items() if not k.startswith('_')}
+            rd['page_text'] = reading.text[:20000]
+            PS.save(PS.new_record(key, source_name, i, source_sha, PS.dhash(png), _png_dims(png),
+                                  PS.identity_tokens(page_text), ('text layer' if text_words else 'RapidOCR'),
+                                  PR.EXTRACTOR_VERSION, rd, ocr_version=_ocr_version()))
+            if store_stats is not None:
+                store_stats['read'] = store_stats.get('read', 0) + 1
+        except Exception as e:
+            recs[0]['source'] = (recs[0].get('source') or '') + f' | not stored: {str(e)[:60]}'
     return recs
 
 
-def paychecks_from_pdf(data: bytes, hint='', max_pages=200, progress=None, workers=None):
+def _ocr_version():
+    try:
+        import rapidocr_onnxruntime as R
+        return 'rapidocr ' + str(getattr(R, '__version__', 'unknown'))
+    except Exception:
+        try:
+            import pytesseract
+            return 'tesseract ' + str(pytesseract.get_tesseract_version())
+        except Exception:
+            return 'unknown'
+
+
+def _looks_read(reading):
+    """Did this reading find the page at all: a couple of the requested figures and something that reads as a name.
+    Used to decide whether to try the other orientation, not to judge the figures themselves."""
+    got = sum(1 for f in reading.fields.values() if f.value is not None)
+    has_words = len([w for w in reading.words if re.search(r'[A-Za-z]{3}', w.text)]) > 20
+    return got >= 3 and has_words
+
+
+def _table_read(words):
+    """Read the page as a table of people, upright and transposed, and say whether the reading may be trusted.
+
+    A matrix that prints its labels down the left and one person per column becomes, transposed, a table with a
+    header row, so both orientations are tried and the better scoring one is taken. The gate is the page's own
+    arithmetic: a reading whose rows do not tie is not used.
+    """
+    from . import tableread as TR
+    from . import pageread as PR
+    if not words:
+        return None, dict(accepted=False, rows=0, does_not_tie=0)
+    best = None
+    for ws, how in ((words, 'as printed'), (PR.transpose_words(words), 'transposed')):
+        try:
+            t = TR.read_table(ws)
+        except Exception:
+            continue
+        if t.is_table and (best is None or t.score > best.score):
+            t.note = (t.note or '') + f' read {how}'
+            best = t
+    if best is None:
+        return None, dict(accepted=False, rows=0, does_not_tie=0)
+    coh = TR.coherence(best)
+    rows = coh.get('rows', 0)
+    ties = coh.get('ties', 0)
+    accepted = rows >= 2 and ties >= max(2, int(rows * 0.6))
+    return best, dict(accepted=accepted, rows=rows, ties=ties,
+                      does_not_tie=coh.get('does_not_tie', rows - ties))
+
+
+def _record_from_table_row(row, i, table):
+    """One employee row of a table, as a paycheck record."""
+    name = (row.identity or '').strip()
+    if not name and not row.identity_id:
+        return None
+    rec = {k: v for k, v in row.values.items()
+           if k in ('gross', 'federal', 'state', 'social_security', 'medicare', 'net_pay', 'taxable_wages',
+                    'medicare_gross', 'premium', 'fee', 'reimbursement', 'retirement')}
+    rec['name'] = name
+    if row.identity_id:
+        rec['employee_id'] = row.identity_id
+    rec['fee_from_statement'] = rec.get('fee') is not None
+    rec['source'] = (f'page {i+1}, table row {row.index}, columns '
+                     + ', '.join(c.name for c in table.columns))
+    return rec
+
+
+def _png_dims(png):
+    try:
+        from PIL import Image
+        with Image.open(io.BytesIO(png)) as im:
+            return list(im.size)
+    except Exception:
+        return [0, 0]
+
+
+def paychecks_from_pdf(data: bytes, hint='', max_pages=200, progress=None, workers=None, source_name='',
+                       store_stats=None):
     """One record per statement page. The label regex runs first because it is deterministic; Groq fills what the
     regex could not find and names the employee when the layout hides it. Pages with no text layer are OCRd first.
     Pages are independent, so they are read concurrently: OCR waits on the shell and the model call waits on the
     network, and a pack of eighty statements is otherwise almost all waiting."""
     from concurrent.futures import ThreadPoolExecutor
     if workers is None:
-        # One page in flight per CPU. The OCR engine is compute bound and pinned to a single thread, so more pages
-        # at once only adds contention; the 512 MiB instance was also OOM killed at eight.
-        workers = int(os.environ.get('PDF_WORKERS', '2'))
+        # One page in flight per CPU, taken from the machine rather than assumed: the OCR engine is compute bound
+        # and pinned to one thread, so more pages at once only adds contention, and fewer wastes a core.
+        workers = int(os.environ.get('PDF_WORKERS', '0')) or max(2, min(4, (os.cpu_count() or 2)))
     pages = pdf_pages_text(data) or []
     if not pages:
         try:
@@ -736,6 +971,7 @@ def paychecks_from_pdf(data: bytes, hint='', max_pages=200, progress=None, worke
         except Exception:
             pages = []
     pages = pages[:max_pages]
+    src_sha = hashlib.sha256(data).hexdigest()
     _MODEL_BUDGET[0] = int(os.environ.get('GROQ_PAGE_BUDGET', '15'))
     rot, done = [None], [0]   # filled by the first page that OCRs cleanly, then reused by the rest
     if progress:
@@ -745,7 +981,8 @@ def paychecks_from_pdf(data: bytes, hint='', max_pages=200, progress=None, worke
         i, text = arg
         t0 = _time.time()
         try:
-            out = _page_record(data, i, text, hint, rot)
+            out = _page_record(data, i, text, hint, rot, source_name=source_name, source_sha=src_sha,
+                               store_stats=store_stats)
         except Exception as e:
             out = [dict(name=None, source=f'page {i+1}, failed: {str(e)[:70]}')]
         print(f'[read] {hint or "pack"} page {i+1}/{len(pages)} {_time.time() - t0:.1f}s '
@@ -864,7 +1101,7 @@ def to_paycheck(rec) -> Paycheck:
                     cafeteria=g('cafeteria'), other_deductions=g('other_deductions'), source=rec.get('source', ''))
     pc.federal_unreliable = rec.get('federal_unreliable')
     for k in ('w4_status', 'w4_multijob', 'w4_children', 'w4_extra', 'retirement_line', 'other_total',
-              'total_deductions', 'net_pay_corrected', 'net_pay_unreliable'):
+              'total_deductions', 'net_pay_corrected', 'net_pay_unreliable', 'net_pay_disputed'):
         setattr(pc, k, rec.get(k))
     return pc
 

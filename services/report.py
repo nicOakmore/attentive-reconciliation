@@ -214,7 +214,35 @@ def employee_block(doc, a, client=''):
     elif a.engine.allotment is None or a.actual_net_change is None:
         miss = 'the proposal allotment' if a.engine.allotment is None else 'net pay on both statements'
         _p(doc, f"Allotment against actual net pay cannot be reconciled because {miss} is unavailable.")
+    _uncertainty_block(doc, a)
     _p(doc, f"Resolution: {_resolution(a)}", bold=True, space_after=14)
+
+
+def _uncertainty_block(doc, a):
+    """Where the statements do not tie, say what the reading uncertainty implies. Every figure here is modelled and
+    labelled as such: it does not replace anything printed on the payroll, and it does not close the exception."""
+    u = getattr(a, 'uncertainty', None)
+    if not u or (not u.get('statements') and not u.get('gap_interval')):
+        return
+    _keep(_p(doc, 'Uncertainty analysis, modelled', size=9.5, bold=True, color=NAVY, space_after=2))
+    for st in (u.get('statements') or []):
+        names = ', '.join(f"{s['field'].replace('_', ' ')} at {s['probability']:.0%}" for s in st['suspects'])
+        _p(doc, f"On the {st['statement']} statement the line least consistent with the others is {names}. "
+                f"This is a probability under the reading error model measured on statements whose figures are "
+                f"known, not a statement about the payroll.")
+        ml = st.get('most_likely')
+        if ml and ml.get('readings'):
+            best = ml['readings'][0]
+            _p(doc, f"Read as {money(ml.get('observed'))}. Under the same model the most likely printed value is "
+                    f"{money(best['value'])} with probability {best['probability']:.0%}. The figure used in this "
+                    f"report remains the one read from the page.")
+    iv = u.get('gap_interval')
+    if iv:
+        _p(doc, f"Carrying the reading error through to the conclusion, the gap between allotment and net pay "
+                f"change has a modelled 95 per cent interval of {money(iv['low'])} to {money(iv['high'])}, median "
+                f"{money(iv['median'])}, from {iv['draws']:,} draws. The chance the gap exceeds "
+                f"{money(iv['materiality'])} either way is {iv['probability_beyond_materiality']:.0%}. This "
+                f"interval is modelled from the reading uncertainty and is not a payroll figure.", space_after=6)
 
 
 def _verdict_sentence(a):
@@ -341,6 +369,11 @@ def build(audits, summary, notes, client='', files=None, ai_paragraph='', period
             'review does not compare or conclude on that W-4 field; its presence or value is outside the available '
             'statement evidence.', size=9, color=GREY, space_after=8)
     _p(doc, 'Reading the statements', size=12, bold=True, color=NAVY, space_after=4)
+    _p(doc, 'Each page is read once and the reading is kept, with the words and their positions behind every '
+            'figure, so a page that appears in a later pack is not read again and a figure can be traced to the '
+            'words it came from. A figure corrected by a reviewer is recorded against that page as a correction: '
+            'the original machine reading is kept, the correction is applied on top of it, and both are reported.',
+         size=9, color=GREY, space_after=8)
     _p(doc, 'The statements in these packs are scanned images, so every figure is read by optical character '
             'recognition and then located by its printed label. Net pay appears four times on the same statement: '
             'the net pay line, the direct deposit total, the sum of the individual deposit rows, and gross pay less '

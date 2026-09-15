@@ -140,7 +140,9 @@ def _row(a):
                 retirement_not_in_census=a.retirement_not_in_census,
                 findings=[dict(label=f.label, amount=f.amount, detail=f.detail) for f in a.findings],
                 before=d['before'], after=d['after'], engine=d['engine'], census=d['census'],
-                pay_periods=a.pay_periods, expected_net_change=a.expected_net_change, identity_gap=a.identity_gap)
+                pay_periods=a.pay_periods, expected_net_change=a.expected_net_change, identity_gap=a.identity_gap,
+                uncertainty=getattr(a, 'uncertainty', None),
+                page_keys=[k for k in (getattr(a.before, 'source', ''), getattr(a.after, 'source', '')) if k])
 
 
 @app.get('/report/<job>.docx')
@@ -175,7 +177,9 @@ def diag():
         timing['scores'] = {a: P._orientation_score(P._ocr_rotated(mid, a)) for a in (0, 180, 90, 270)}
         t = time.time(); txt = P._ocr_rotated(png, ang); timing['ocr_full_page'] = round(time.time() - t, 2)
         timing['chars'] = len((txt or '').strip())
-    return jsonify(ocr=P.ocr_selftest(), timing=timing, workers=os.environ.get('PDF_WORKERS', '6'),
+    from services import pagestore as PS
+    return jsonify(ocr=P.ocr_selftest(), timing=timing, store=PS.stats_summary(),
+                   workers=os.environ.get('PDF_WORKERS', '6'),
                    jobs={k: dict(state=v.get('state'), stage=v.get('stage'), done=v.get('done'),
                                  total=v.get('total')) for k, v in JOBS.items()})
 
@@ -211,6 +215,48 @@ def diag_pack():
                                  if r.get(k) is None],
                         corrected=r.get('net_pay_corrected'), unreliable=r.get('net_pay_unreliable')))
     return jsonify(pages=out, needing_model=sum(1 for p in out if p.get('missing')))
+
+
+@app.get('/store')
+def store():
+    """What the page store holds. A page read once is served from here on every later run."""
+    from services import pagestore as PS
+    return jsonify(**PS.stats_summary())
+
+
+@app.post('/correct')
+def correct():
+    """Record a human correction to one figure on one page. The machine reading is kept; the correction is applied
+    on top of it from the next run onwards, and the report says who changed it and why."""
+    from services import pagestore as PS
+    d = request.get_json(silent=True) or request.form
+    key, fld = (d.get('page_key') or '').strip(), (d.get('field') or '').strip()
+    if not key or not fld:
+        return jsonify(error='page_key and field are required'), 400
+    try:
+        value = float(d.get('value'))
+    except (TypeError, ValueError):
+        return jsonify(error='value must be a number'), 400
+    rec = PS.add_correction(key, fld, value, d.get('user') or 'unknown', d.get('reason') or '')
+    if rec is None:
+        return jsonify(error='no stored page with that key'), 404
+    return jsonify(page_key=key, field=fld, effective=PS.effective_fields(rec).get(fld),
+                   corrections=len(rec.get('corrections') or []))
+
+
+@app.get('/page/<key>')
+def page(key):
+    """One stored page: what was read, from which words, and any corrections recorded against it."""
+    from services import pagestore as PS
+    rec = PS.load(key)
+    if rec is None:
+        return jsonify(error='unknown page'), 404
+    reading = rec.get('reading') or {}
+    return jsonify(page_key=key, source_file=rec.get('source_file'), page=rec.get('source_page_number'),
+                   engine=rec.get('ocr_engine'), extractor_version=rec.get('extractor_version'),
+                   identity_tokens=rec.get('identity_tokens'), fields=PS.effective_fields(rec),
+                   gutters=reading.get('gutters'), n_words=len((reading.get('words') or [])),
+                   corrections=rec.get('corrections'))
 
 
 @app.get('/healthz')
