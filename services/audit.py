@@ -329,13 +329,24 @@ def _attribute(emp: EmployeeAudit) -> list:
         # The arithmetic establishes a reduction of federal taxable wages that stays in Medicare wages. Only the
         # printed line establishes that the reduction is retirement, so the label follows the evidence.
         if b.retirement_line and b.retirement:
-            out.append(Finding('Retirement deduction not in the census', emp.retirement_not_in_census,
-                               'The statement prints a retirement reduction line of '
-                               f'{_m(per_month(b.retirement, emp.pay_periods))} a month and no census field carries it, '
-                               'so the engine\'s federal taxable income input exceeds the federal taxable wages on '
-                               'the payroll statement by this amount. The statement identifies the difference as a '
-                               'retirement reduction. Its Social Security and Medicare treatment follows the payroll '
-                               'lines, not this finding.'))
+            named = per_month(b.retirement, emp.pay_periods)
+            unnamed = r2(emp.retirement_not_in_census - named)
+            # The amount is the whole reduction of federal taxable wages that the census does not carry. The
+            # statement names part of it on a retirement line; any remainder is a further pre-tax deduction the
+            # statement does not name, and saying so is the difference between a figure a reader can check and a
+            # sentence that quotes one number while claiming another.
+            detail = (f'Medicare wages exceed federal taxable wages by {_m(emp.retirement_not_in_census)} a month '
+                      f'and no census field carries it, so the engine calculated on income the payroll does not tax '
+                      f'for federal purposes. ')
+            if abs(unnamed) <= 0.02:
+                detail += (f'The statement names it on a retirement reduction line of {_m(named)} a month. ')
+            else:
+                detail += (f'The statement names {_m(named)} of it on a retirement reduction line; the remaining '
+                           f'{_m(unnamed)} a month is a further deduction that reduces federal taxable wages and '
+                           f'stays in Medicare wages, which the statement does not name. ')
+            detail += ('The Social Security and Medicare treatment of these deductions follows the payroll lines, '
+                       'not this finding.')
+            out.append(Finding('Retirement deduction not in the census', emp.retirement_not_in_census, detail))
         else:
             out.append(Finding('Federal taxable wage reduction not in the census', emp.retirement_not_in_census,
                                'Medicare wages exceed federal taxable wages by this amount each month, so a deduction '
