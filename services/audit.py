@@ -209,8 +209,10 @@ def _attribute(emp: EmployeeAudit) -> list:
             out.append(Finding('Retirement deduction not in the census', emp.retirement_not_in_census,
                                'The statement prints a retirement reduction line of '
                                f'{_m(per_month(b.retirement, emp.pay_periods))} a month and no census field carries it, '
-                               'so the engine calculated on income the payroll does not tax for federal purposes. '
-                               'Its Social Security and Medicare treatment follows the payroll lines, not this finding.'))
+                               'so the engine\'s federal taxable income input exceeds the federal taxable wages on '
+                               'the payroll statement by this amount. The statement identifies the difference as a '
+                               'retirement reduction. Its Social Security and Medicare treatment follows the payroll '
+                               'lines, not this finding.'))
         else:
             out.append(Finding('Federal taxable wage reduction not in the census', emp.retirement_not_in_census,
                                'Medicare wages exceed federal taxable wages by this amount each month, so a deduction '
@@ -256,7 +258,9 @@ def _attribute(emp: EmployeeAudit) -> list:
     if b.gross is not None and a.gross is not None and abs(a.gross - b.gross) > CENT:
         out.append(Finding('Other changed earning or deduction', per_month(a.gross - b.gross, emp.pay_periods),
                            'Gross pay differs between the two statements, so an earning changed as well as the '
-                           'premium. The comparison is not like for like.'))
+                           'premium and the comparison is not like for like. This cause is raised only from gross '
+                           'pay, which the scan reads reliably; its absence does not establish that no other '
+                           'payroll line changed.'))
     # A movement in the statement's own "other deductions" total is not used as evidence here: on a scanned pack
     # that total is one of the least reliably read figures, and an untied identity is reported as such instead.
     identity_broken = emp.identity_gap is not None and abs(emp.identity_gap) > 2.0

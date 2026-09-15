@@ -193,9 +193,24 @@ def employee_block(doc, a, client=''):
             _p(doc, f"Engine allotment is {money(a.engine.allotment)} and the actual net pay change is "
                     f"{money(a.actual_net_change)}. They agree.")
         else:
-            cause = named[0].label.lower() if named else 'a cause the submitted data does not establish'
-            _p(doc, f"Engine allotment is {money(a.engine.allotment)}. Actual net pay change is "
-                    f"{money(a.actual_net_change)}. The difference is {money(a.allotment_gap)}, attributed to {cause}.")
+            # One finding is only presented as the cause of the whole gap when it is the only finding open. Where
+            # several are open, the report says what is established and stops short of apportioning the gap.
+            open_findings = [f for f in named]
+            head = (f"Engine allotment is {money(a.engine.allotment)}. Actual net pay change is "
+                    f"{money(a.actual_net_change)}. The difference is {money(a.allotment_gap)}. ")
+            if len(open_findings) == 1:
+                f = open_findings[0]
+                _p(doc, head + f"The only finding established on the submitted data is "
+                              f"{f.label.lower()}{' of ' + money(f.amount) if f.amount is not None else ''}. "
+                              f"Quantifying its effect on the difference requires a rerun with that input corrected.")
+            elif open_findings:
+                bits = ', '.join(f"{f.label.lower()}{' of ' + money(f.amount) if f.amount is not None else ''}"
+                                 for f in open_findings)
+                _p(doc, head + f"The submitted data establishes more than one finding on this employee: {bits}. "
+                              f"The tool does not apportion the difference between them; correct the census input, "
+                              f"rerun the calculation and reassess what remains.")
+            else:
+                _p(doc, head + 'The submitted data does not establish a cause.')
     elif a.engine.allotment is None or a.actual_net_change is None:
         miss = 'the proposal allotment' if a.engine.allotment is None else 'net pay on both statements'
         _p(doc, f"Allotment against actual net pay cannot be reconciled because {miss} is unavailable.")
@@ -275,14 +290,18 @@ def build(audits, summary, notes, client='', files=None, ai_paragraph='', period
     if summary['causes']:
         _p(doc, 'Causes', size=12, bold=True, color=NAVY, space_after=4)
         _p(doc, 'Cause counts are not mutually exclusive. An employee may carry more than one cause, so these counts '
-                'do not sum to the population.', size=8.5, color=GREY, space_after=4)
+                'do not sum to the population. A cause is reported only where a reliably extracted payroll line or '
+                'census field establishes it; the absence of a cause is not evidence that the underlying condition '
+                'is absent.', size=8.5, color=GREY, space_after=4)
         _table(doc, ['Cause', 'Employees', 'Amount, monthly'],
                [[k, v['employees'], money(v['amount'])] for k, v in summary['causes']], [4.2, 1.4, 1.3])
         _p(doc, '', space_after=8)
     if summary.get('total_gap') is not None:
         _p(doc, f"The aggregate difference between engine allotment and actual net pay change is "
-                f"{money(summary['total_gap'])} a month across {summary['employees']} employees. "
-                f"{summary['decreases']} employees take home less after the premium.", space_after=8)
+                f"{money(summary['total_gap'])} a month across the {summary['covered']} employees the submitted "
+                f"statements reconcile, in a population of {summary['employees']}. "
+                f"{summary['decreases']} employees show lower reported net pay on the statement after the premium "
+                f"than on the statement before it.", space_after=8)
     _p(doc, 'Scope and method', size=12, bold=True, color=NAVY, space_after=4)
     for n in (files or []) + notes:
         _p(doc, n, size=9, color=GREY, space_after=2)
@@ -311,9 +330,10 @@ def build(audits, summary, notes, client='', files=None, ai_paragraph='', period
             'recognition and then located by its printed label. Net pay appears four times on the same statement: '
             'the net pay line, the direct deposit total, the sum of the individual deposit rows, and gross pay less '
             'total deductions. These are four representations of one document, not four independent sources. Where '
-            'at least two of them agree, the agreed figure is used, as an extraction control; where no two agree, no '
-            'net pay is inferred and the employee is reported unverified. The control establishes that the figure '
-            'was read correctly, not that the payroll statement itself is correct. Every figure the tool takes from '
+            'at least two of them agree, the agreed figure is accepted as the extracted net pay for the '
+            'reconciliation. That is an extraction control only: it establishes that the readings are consistent '
+            'across repeated printings of the same figure, not that the payroll statement itself is correct. Where '
+            'no two agree, no net pay is accepted and the employee is reported unverified. Every figure the tool takes from '
             'anywhere other than its own printed line is recorded against that employee in the run notes.',
          size=9, color=GREY, space_after=14)
     for a in audits:
