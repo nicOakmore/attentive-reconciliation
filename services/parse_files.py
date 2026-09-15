@@ -277,17 +277,36 @@ def _ocr_rotated(png, angle):
 
 
 def _detect_rotation(data, index):
-    """Which way up is this page. Read a small render at each rotation and keep the one that reads as words: a
-    quarter-size pass costs a fraction of a full one, so four of them are cheaper than one wrong full pass."""
-    small = pdf_page_png(data, index, scale=0.9)
-    best, best_score = 0, -1
-    for angle in (0, 180, 90, 270):
-        sc = _orientation_score(_ocr_rotated(small, angle))
-        if sc > best_score:
-            best, best_score = angle, sc
-        if best_score >= 10:
-            break
+    """Which way up is this page. Tesseract's own orientation detection answers this directly and costs a fraction
+    of a read, so ask it first; fall back to reading a mid-size render at each rotation and scoring how much each
+    reading looks like a payroll statement. Upright has to be beaten by a clear margin, because a wrong rotation
+    turns the whole statement into noise."""
+    osd = _osd_rotation(data, index)
+    if osd is not None:
+        return osd
+    mid = pdf_page_png(data, index, scale=1.4)
+    scores = {angle: _orientation_score(_ocr_rotated(mid, angle)) for angle in (0, 180, 90, 270)}
+    best = max(scores, key=lambda a: scores[a])
+    if best != 0 and scores[best] - scores[0] < 4:
+        best = 0
     return best
+
+
+def _osd_rotation(data, index):
+    """Tesseract orientation and script detection. Returns the PIL rotation that makes the page upright, or None."""
+    try:
+        import pytesseract
+        from PIL import Image
+        png = pdf_page_png(data, index, scale=1.2)
+        with Image.open(io.BytesIO(png)) as im:
+            osd = pytesseract.image_to_osd(im, output_type=pytesseract.Output.DICT)
+        deg = int(osd.get('rotate', 0)) % 360          # degrees clockwise needed to upright the page
+        conf = float(osd.get('orientation_conf', 0) or 0)
+        if conf < 1.0:
+            return None
+        return (360 - deg) % 360                        # PIL rotates counter-clockwise
+    except Exception:
+        return None
 
 
 def pdf_page_png(data: bytes, index: int, scale=2.0):

@@ -170,6 +170,9 @@ def diag():
         timing['png_bytes'] = len(png)
         t = time.time(); ang = P._detect_rotation(data, idx); timing['detect_rotation'] = round(time.time() - t, 2)
         timing['angle'] = ang
+        timing['osd'] = P._osd_rotation(data, idx)
+        mid = P.pdf_page_png(data, idx, scale=1.4)
+        timing['scores'] = {a: P._orientation_score(P._ocr_rotated(mid, a)) for a in (0, 180, 90, 270)}
         t = time.time(); txt = P._ocr_rotated(png, ang); timing['ocr_full_page'] = round(time.time() - t, 2)
         timing['chars'] = len((txt or '').strip())
     return jsonify(ocr=P.ocr_selftest(), timing=timing, workers=os.environ.get('PDF_WORKERS', '6'),
