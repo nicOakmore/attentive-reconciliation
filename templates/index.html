@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Payroll Reconciliation — Attentive</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+<link rel="stylesheet" href="/static/theme.css">
+<style>
+.upload-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+.summary-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 14px; }
+.summary-box { text-align: center; padding: 16px 10px; border: 1px solid var(--border); border-radius: var(--radius); }
+.summary-box .num { font-size: 28px; font-weight: 500; color: var(--black); }
+.summary-box .lbl { font-size: 11px; color: var(--grey-700); text-transform: uppercase; letter-spacing: .3px; margin-top: 4px; }
+.summary-box.green .num { color: var(--green); } .summary-box.yellow .num { color: var(--yellow); }
+.summary-box.red .num { color: var(--red); } .summary-box.acc .num { color: var(--primary); font-size: 22px; }
+.results-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.results-table th { background: var(--grey-100); padding: 10px 12px; text-align: left; font-weight: 500; color: var(--grey-700); font-size: 12px; border-bottom: 1px solid var(--border); }
+.results-table td { padding: 9px 12px; border-bottom: 1px solid var(--border); }
+.results-table td.num, .results-table th.num { text-align: right; font-variant-numeric: tabular-nums; }
+.results-table tr.expandable { cursor: pointer; } .results-table tr.expandable:hover { background: var(--grey-50); }
+.results-table tr.expanded { background: var(--primary-bg); }
+.results-table tr.detail-row td { padding: 0; background: var(--grey-50); }
+.detail-panel { padding: 16px 18px; }
+.detail-section { margin-bottom: 14px; }
+.detail-section h4 { font-size: 12px; font-weight: 500; color: var(--grey-700); text-transform: uppercase; margin-bottom: 8px; }
+.detail-table { width: 100%; font-size: 13px; border-collapse: collapse; }
+.detail-table th { padding: 6px 10px; font-weight: 500; color: var(--grey-700); text-align: left; font-size: 12px; }
+.detail-table td { padding: 6px 10px; border-bottom: 1px solid var(--grey-200); }
+.detail-table td.num, .detail-table th.num { text-align: right; font-variant-numeric: tabular-nums; }
+.diag { padding: 8px 12px; border-left: 3px solid var(--grey-400); background: var(--white); margin-bottom: 6px; font-size: 13px; }
+.diag.green { border-left-color: var(--green); } .diag.yellow { border-left-color: var(--yellow); } .diag.red { border-left-color: var(--red); }
+.ai-badge { background: var(--primary); color: var(--white); font-size: 9px; font-weight: 700; padding: 1px 6px; border-radius: 3px; margin-left: 8px; vertical-align: middle; }
+.pill { font-size: 11px; padding: 2px 8px; border-radius: 10px; font-weight: 500; }
+.pill.green { background: var(--green-bg); color: var(--green); } .pill.yellow { background: var(--yellow-bg); color: #8a6100; }
+.pill.red { background: var(--red-bg); color: var(--red); } .pill.grey { background: var(--grey-200); color: var(--grey-700); }
+.verdict { font-size: 13px; margin: 2px 0 10px; }
+.sentence { font-size: 13px; margin: 6px 0; }
+.spinner { width: 15px; height: 15px; border: 2px solid var(--grey-300); border-top-color: var(--primary); border-radius: 50%; display: inline-block; animation: spin .8s linear infinite; vertical-align: -3px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+<div class="toolbar">
+  <div class="container">
+    <div class="flex gap-3" style="align-items:center;">
+      <img src="/static/logo.png" class="logo">
+      <div class="nav"><span class="nav-link active">Reconciliation</span></div>
+    </div>
+    <div class="user-menu"><span class="material-icons icon-sm">account_circle</span><span>admin@admin.com</span></div>
+  </div>
+</div>
+
+<div class="container-app">
+  <div class="page-header">
+    <div>
+      <h1>Payroll Reconciliation</h1>
+      <div class="muted text-sm">Reconcile the proposal against the payroll before and after the premium, employee by employee</div>
+    </div>
+    <div class="flex gap-2" style="align-items:center;">
+      <span class="text-xs muted">AI engine:</span>
+      <span class="pill {{ 'green' if groq_ok else 'red' }}">{{ 'Groq ' + groq_model if groq_ok else 'unavailable' }}</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Client</div>
+    <div class="flex gap-2">
+      <input id="client" class="field" placeholder="Client name, for example Tioga ISD" style="flex:2;font-size:14px;padding:10px 12px;border:1px solid var(--grey-400);border-radius:var(--radius);">
+      <input id="period" class="field" placeholder="Period, for example August 2026" style="flex:1;font-size:14px;padding:10px 12px;border:1px solid var(--grey-400);border-radius:var(--radius);">
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Upload files</div>
+    <div class="upload-grid">
+      <div class="dropzone" id="box-payroll_before">
+        <input type="file" accept=".pdf,.csv,.xlsx,.xls" onchange="pick(this,'payroll_before')">
+        <span class="material-icons" style="font-size:32px;color:var(--grey-500);">payments</span>
+        <div class="label">PAYROLL BEFORE</div><div class="hint">Statements before the premium</div>
+        <div class="filename" id="fname-payroll_before"></div>
+      </div>
+      <div class="dropzone" id="box-payroll_after">
+        <input type="file" accept=".pdf,.csv,.xlsx,.xls" onchange="pick(this,'payroll_after')">
+        <span class="material-icons" style="font-size:32px;color:var(--grey-500);">verified</span>
+        <div class="label">PAYROLL AFTER</div><div class="hint">Mock statements with the premium</div>
+        <div class="filename" id="fname-payroll_after"></div>
+      </div>
+      <div class="dropzone" id="box-census">
+        <input type="file" accept=".csv,.xlsx,.xls" onchange="pick(this,'census')">
+        <span class="material-icons" style="font-size:32px;color:var(--grey-500);">groups</span>
+        <div class="label">CENSUS</div><div class="hint">Master census template</div>
+        <div class="filename" id="fname-census"></div>
+      </div>
+      <div class="dropzone" id="box-proposal">
+        <input type="file" accept=".csv,.xlsx,.xls" onchange="pick(this,'proposal')">
+        <span class="material-icons" style="font-size:32px;color:var(--grey-500);">description</span>
+        <div class="label">PROPOSAL</div><div class="hint">Savings report output</div>
+        <div class="filename" id="fname-proposal"></div>
+      </div>
+    </div>
+    {% if samples %}
+    <div class="mt-2 text-xs muted">Samples:
+      {% for s in samples %}<a href="#" onclick="runSample('{{ s.name }}');return false;" style="color:var(--primary);margin-right:10px;">{{ s.name }}</a>{% endfor %}
+    </div>
+    {% endif %}
+  </div>
+
+  <div class="card flex-between">
+    <button class="btn btn-primary" id="btn-run" onclick="run()" disabled>
+      <span class="material-icons icon-sm">play_arrow</span> Run reconciliation
+    </button>
+    <div id="status" class="text-sm muted"></div>
+    <a id="dl" class="btn btn-stroked" style="display:none;"><span class="material-icons icon-sm">download</span> Download docx</a>
+  </div>
+
+  <div id="out"></div>
+</div>
+
+<script>
+const files = {};
+function pick(input, key) {
+  files[key] = input.files[0] || null;
+  document.getElementById('fname-' + key).textContent = files[key] ? files[key].name : '';
+  document.getElementById('box-' + key).classList.toggle('has-file', !!files[key]);
+  document.getElementById('btn-run').disabled = !(files.census || files.proposal);
+}
+const money = v => v === null || v === undefined ? '' : (v < 0 ? '-$' : '$') + Math.abs(v).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+const signed = v => v === null || v === undefined ? '' : (v > 0 ? '+' : '') + money(v);
+
+function runSample(name) { run(name); }
+
+async function run(sample) {
+  const fd = new FormData();
+  fd.append('client', document.getElementById('client').value);
+  fd.append('period', document.getElementById('period').value);
+  if (sample) fd.append('sample', sample);
+  else for (const k in files) if (files[k]) fd.append(k, files[k]);
+  document.getElementById('status').innerHTML = '<span class="spinner"></span> reading files and reconciling';
+  document.getElementById('btn-run').disabled = true;
+  document.getElementById('dl').style.display = 'none';
+  try {
+    const r = await fetch('/audit', {method: 'POST', body: fd});
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'failed');
+    render(d);
+    document.getElementById('status').textContent = d.employees.length + ' employees in ' + d.seconds + 's';
+    const a = document.getElementById('dl');
+    a.href = '/report/' + d.job + '.docx'; a.style.display = '';
+  } catch (e) {
+    document.getElementById('status').textContent = '';
+    document.getElementById('out').innerHTML = '<div class="card"><div class="diag red">' + e.message + '</div></div>';
+  }
+  document.getElementById('btn-run').disabled = false;
+}
+
+function render(d) {
+  const s = d.summary;
+  let h = '<div class="card"><div class="card-title">Summary</div><div class="summary-grid">';
+  h += box(s.employees, 'employees') + box(s.matched, 'reconciled', 'green') + box(s.attributed, 'cause found', 'yellow')
+     + box(s.unexplained, 'no cause', 'red') + box(money(s.total_gap), 'monthly gap', 'acc');
+  h += '</div>';
+  if (d.paragraph) h += '<div class="sentence">' + d.paragraph + '<span class="ai-badge">AI</span></div>';
+  if (s.causes && s.causes.length) {
+    h += '<table class="detail-table" style="margin-top:10px;"><tr><th>Cause</th><th class="num">Employees</th><th class="num">Monthly amount</th></tr>';
+    s.causes.forEach(c => h += '<tr><td>' + c[0] + '</td><td class="num">' + c[1].employees + '</td><td class="num">' + money(c[1].amount) + '</td></tr>');
+    h += '</table>';
+  }
+  h += '<div class="text-xs muted mt-2">' + (d.files || []).concat(d.notes || []).join(' · ') + '</div></div>';
+
+  h += '<div class="card"><div class="card-title">Employees</div><table class="results-table"><thead><tr>' +
+       '<th>Employee</th><th>Verdict</th><th class="num">Engine allotment</th><th class="num">Actual net change</th>' +
+       '<th class="num">Gap</th><th></th></tr></thead><tbody>';
+  d.employees.forEach((e, i) => {
+    h += '<tr class="expandable" onclick="toggle(' + i + ')" id="row-' + i + '">' +
+         '<td><b>' + e.name + '</b>' + (e.employee_id ? ' <span class="text-xs muted">' + e.employee_id + '</span>' : '') + '</td>' +
+         '<td><span class="pill ' + e.verdict_class + '">' + e.verdict + '</span></td>' +
+         '<td class="num">' + money(e.engine_allotment) + '</td><td class="num">' + money(e.actual_net_change) + '</td>' +
+         '<td class="num">' + signed(e.allotment_gap) + '</td>' +
+         '<td><span class="material-icons icon-sm" id="chev-' + i + '">expand_more</span></td></tr>';
+    h += '<tr class="detail-row" id="det-' + i + '" style="display:none;"><td colspan="6">' + detail(e) + '</td></tr>';
+  });
+  h += '</tbody></table></div>';
+  document.getElementById('out').innerHTML = h;
+}
+
+function box(n, l, cls) { return '<div class="summary-box ' + (cls || '') + '"><div class="num">' + n + '</div><div class="lbl">' + l + '</div></div>'; }
+
+function detail(e) {
+  const b = e.before, a = e.after, en = e.engine, c = e.census, pp = e.pay_periods;
+  let h = '<div class="detail-panel">';
+  h += '<div class="verdict"><b>Verdict.</b> ' + e.verdict + '</div>';
+  h += '<div class="detail-section"><h4>Census input</h4><div class="sentence">' +
+       'Census pre-tax total ' + money((c.pretax_other || 0) + (c.group_health || 0) + (c.retirement_401k || 0)) +
+       (c.pretax_other !== null && c.pretax_other !== undefined ? ' (field Q ' + money(c.pretax_other) + ')' : '') +
+       (e.retirement_not_in_census ? '. Payroll reduces federal taxable wages by a further ' + money(e.retirement_not_in_census) + ' a month for retirement, not carried in any census field.' : '.') +
+       '</div></div>';
+  const lines = [['Gross', b.gross, a.gross], ['Cafeteria deductions', b.cafeteria, a.cafeteria], ['Retirement', b.retirement, a.retirement],
+    ['Premium, pre-tax', b.premium, a.premium], ['Reimbursement', b.reimbursement, a.reimbursement], ['Employee fee', b.fee, a.fee],
+    ['Product sold', b.product, a.product], ['Taxable wages', b.taxable_wages, a.taxable_wages], ['Medicare gross', b.medicare_gross, a.medicare_gross],
+    ['Federal withholding', b.federal, a.federal], ['State withholding', b.state, a.state],
+    ['Social Security', b.social_security, a.social_security], ['Medicare', b.medicare, a.medicare], ['Net pay', b.net_pay, a.net_pay]];
+  const rows = lines.filter(l => l[1] !== null && l[1] !== undefined || l[2] !== null && l[2] !== undefined);
+  if (rows.length) {
+    h += '<div class="detail-section"><h4>Paycheck comparison' + (pp !== 12 ? ' (per pay, ' + pp + ' periods)' : '') + '</h4>' +
+         '<table class="detail-table"><tr><th>Payroll line</th><th class="num">Before</th><th class="num">After</th><th class="num">Change</th></tr>';
+    rows.forEach(l => { const ch = (l[1] === null || l[2] === null || l[1] === undefined || l[2] === undefined) ? null : Math.round((l[2] - l[1]) * 100) / 100;
+      h += '<tr><td>' + l[0] + '</td><td class="num">' + money(l[1]) + '</td><td class="num">' + money(l[2]) + '</td><td class="num">' + signed(ch) + '</td></tr>'; });
+    h += '</table>';
+    if (b.federal !== null && a.federal !== null && b.federal !== undefined && a.federal !== undefined)
+      h += '<div class="sentence">Federal withholding savings are ' + money(b.federal) + ' minus ' + money(a.federal) + ' = ' + money(Math.round((b.federal - a.federal) * 100) / 100) + ' per pay, ' + money(e.payroll_federal_savings) + ' a month.</div>';
+    if (b.net_pay !== null && a.net_pay !== null && b.net_pay !== undefined && a.net_pay !== undefined)
+      h += '<div class="sentence">Net pay change is ' + money(a.net_pay) + ' minus ' + money(b.net_pay) + ' = ' + money(Math.round((a.net_pay - b.net_pay) * 100) / 100) + ' per pay, ' + money(e.actual_net_change) + ' a month.</div>';
+    h += '</div>';
+  }
+  h += '<div class="detail-section"><h4>Engine reconciliation</h4><table class="detail-table">' +
+       '<tr><th>Metric</th><th class="num">Engine</th><th class="num">Payroll</th><th class="num">Difference</th></tr>' +
+       tr('Federal savings', en.federal_savings, e.payroll_federal_savings) +
+       tr('Taxable income before', en.taxable_income_before, b.medicare_gross === null || b.medicare_gross === undefined ? null : Math.round(b.medicare_gross * pp / 12 * 100) / 100) +
+       '</table></div>';
+  h += '<div class="detail-section"><h4>Cause</h4>';
+  (e.findings || []).forEach(f => h += '<div class="diag ' + (f.label === 'Match' ? 'green' : (f.label === 'Unattributed' ? 'red' : 'yellow')) + '"><b>' + f.label + (f.amount !== null && f.amount !== undefined ? ': ' + money(f.amount) : '') + '.</b> ' + f.detail + '</div>');
+  h += '</div>';
+  if (en.allotment !== null && e.actual_net_change !== null && en.allotment !== undefined && e.actual_net_change !== undefined) {
+    h += '<div class="detail-section"><h4>Allotment against actual net pay</h4><table class="detail-table">' +
+         '<tr><td>Engine allotment</td><td class="num">' + money(en.allotment) + '</td></tr>' +
+         '<tr><td>Actual net pay change</td><td class="num">' + money(e.actual_net_change) + '</td></tr>' +
+         '<tr><td><b>Gap</b></td><td class="num"><b>' + signed(e.allotment_gap) + '</b></td></tr></table></div>';
+  }
+  return h + '</div>';
+}
+function tr(label, eng, pay) {
+  if ((eng === null || eng === undefined) && (pay === null || pay === undefined)) return '';
+  const d = (eng === null || pay === null || eng === undefined || pay === undefined) ? null : Math.round((pay - eng) * 100) / 100;
+  return '<tr><td>' + label + '</td><td class="num">' + money(eng) + '</td><td class="num">' + money(pay) + '</td><td class="num">' + signed(d) + '</td></tr>';
+}
+function toggle(i) {
+  const d = document.getElementById('det-' + i), r = document.getElementById('row-' + i), c = document.getElementById('chev-' + i);
+  const open = d.style.display !== 'none';
+  d.style.display = open ? 'none' : '';
+  r.classList.toggle('expanded', !open);
+  c.textContent = open ? 'expand_more' : 'expand_less';
+}
+</script>
+</body>
+</html>

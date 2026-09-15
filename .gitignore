@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+.env
+samples/
+.env.local
+format_guidance.txt
