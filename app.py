@@ -4,7 +4,7 @@ The arithmetic is deterministic (services/audit.py). Groq reads payroll statemen
 unfamiliar spreadsheet headers, and writes the one summary paragraph. It never produces a number or a cause.
 """
 import os, io, json, uuid, time, traceback, threading
-from flask import Flask, request, jsonify, send_file, render_template, abort
+from flask import Flask, request, jsonify, send_file, render_template, abort, make_response
 
 from services import build as builder
 from services import report as reporter
@@ -26,8 +26,12 @@ def _file(field):
 @app.get('/')
 def index():
     ok, model = groq_client.health()
-    return render_template('index.html', groq_ok=ok, groq_model=model if ok else '',
-                           samples=_samples())
+    page = render_template('index.html', groq_ok=ok, groq_model=model if ok else '', samples=_samples())
+    # The page carries its own behaviour, so a browser holding an old copy shows old behaviour and looks like a
+    # change that never happened. It is small; it is fetched fresh every time.
+    resp = make_response(page)
+    resp.headers['Cache-Control'] = 'no-store, max-age=0'
+    return resp
 
 
 def _samples():
