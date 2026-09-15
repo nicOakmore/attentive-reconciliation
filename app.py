@@ -155,14 +155,15 @@ def download(job):
                      mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document')
 
 
-@app.get('/diag')
+@app.route('/diag', methods=['GET', 'POST'])
 def diag():
     from services import parse_files as P
     timing = None
+    up = request.files.get('pdf')
     src = request.args.get('pdf')
-    if src:
+    if up or src:
         import time
-        data = open(src, 'rb').read()
+        data = up.read() if up else open(src, 'rb').read()
         idx = int(request.args.get('page', '0'))
         timing = {}
         t = time.time(); png = P.pdf_page_png(data, idx, scale=1.9); timing['render_full'] = round(time.time() - t, 2)
