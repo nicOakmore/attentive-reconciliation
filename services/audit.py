@@ -186,28 +186,6 @@ def audit_employee(emp: EmployeeAudit) -> EmployeeAudit:
         emp.ti_before_gap = r2(e.taxable_income_before - per_month(b.medicare_gross, pp))
 
     emp.findings = _attribute(emp)
-    # One ordered repair at the top of the block: the census corrections this employee needs, in one line.
-    if emp.allotment_gap is not None and emp.allotment_gap < -CENT:
-        ev = _evidence(emp)
-        census_labels = {'Retirement deduction missing from the census',
-                         'A pre-tax deduction is missing from the census',
-                         'A deduction sits in the wrong census column',
-                         'The proposal starts from less income than the payslip shows',
-                         'The census does not have Social Security set to N',
-                         'The census has Social Security set to N but payroll deducts it',
-                         'The census does not have Medicare set to N',
-                         'The proposal counts Social Security savings this payroll never pays',
-                         'The payroll pays Social Security the proposal ignores',
-                         'The employee fee in the proposal is not the fee payroll deducts',
-                         'The premium on the payslip is not the premium in the proposal',
-                         'The proposal calculated on no income at all'}
-        open_labels = {f.label for f in emp.findings}
-        acts = []
-        if open_labels & census_labels:
-            acts.append(ev.get('rerun_fix') or '')
-        if ev.get('payroll_action'):
-            acts.append(ev['payroll_action'])
-        emp.primary_action = ' '.join(a for a in acts if a)
     emp.uncertainty = _uncertainty(emp)
     # Where a payslip does not add up and the census plus the statement's own arithmetic say decisively what one
     # misread line must have been, the audit uses the corrected figure and reports the correction, instead of
@@ -266,7 +244,96 @@ def audit_employee(emp: EmployeeAudit) -> EmployeeAudit:
     # Evidence validity, then the inputs that set the taxable base, then programme settings, then how payroll
     # executed the premium, then what is left unexplained, then a limit on the promise.
     emp.findings.sort(key=lambda f: _ORDER.get(f.label, 45))
+    # Built last, from the sorted findings, so the steps run in the order the reader must work in: the payslip
+    # evidence first, then the census, then payroll, then the promise.
+    emp.primary_action = _actions(emp)
     return emp
+
+
+_ACTIONS = {
+    # evidence first: nothing else can be trusted until the payslips are sound
+    'The statement shows two different net pay figures': 'Ask payroll for a clean copy of both payslips.',
+    'The deductions add up to more than the pay': 'Ask payroll for a clean copy of both payslips.',
+    'The statement does not add up': 'Ask payroll for a clean copy of both payslips.',
+    'The statement and the proposal disagree': 'Ask payroll for a clean copy of both payslips.',
+    'Something else changed between the two payslips': 'Ask payroll for a mock in which only the premium changes.',
+    'Taxable wages fell by more than the premium': 'Ask payroll for a mock in which only the premium changes.',
+    'Medicare wages fell by more than the premium': 'Ask payroll for a mock in which only the premium changes.',
+    'The retirement deduction changed with the premium': 'Ask payroll for a mock in which only the premium changes.',
+    # the inputs that set the taxable base
+    'No census row matches this employee': 'Add this employee to the census.',
+    'The proposal calculated on no income at all': 'Set the buffer in the proposal program settings to 100.',
+    'Retirement deduction missing from the census': 'Put {ret_missing} a month in the census 401-k/IRA column.',
+    'A pre-tax deduction is missing from the census': 'Add the missing pre-tax amount to the census.',
+    'A deduction sits in the wrong census column':
+        'Move the retirement amount from the census Other pre-tax column to the 401-k/IRA column.',
+    'The proposal starts from less income than the payslip shows':
+        'Reduce the census pre-tax fields to match the payslip.',
+    'The W-4 on payroll differs from the census': 'Correct the census W-4 columns to match payroll.',
+    # programme settings
+    'The census does not have Social Security set to N': 'Set the census SocialSec column to N.',
+    'The proposal counts Social Security savings this payroll never pays': 'Set the census SocialSec column to N.',
+    'The census has Social Security set to N but payroll deducts it': 'Set the census SocialSec column to Y.',
+    'The payroll pays Social Security the proposal ignores': 'Set the census SocialSec column to Y.',
+    'The census does not have Medicare set to N': 'Set the census Medicare column to N.',
+    'The proposal counts Medicare savings this payroll never pays': 'Set the census Medicare column to N.',
+    'The payroll pays Medicare the proposal ignores': 'Set the census Medicare column to Y.',
+    'The employee fee in the proposal is not the fee payroll deducts':
+        'Set the employee fee in the proposal program settings to {fee_pay} a month.',
+    'The premium on the payslip is not the premium in the proposal':
+        'Set the premium in the proposal program settings to {premium_m} a month.',
+    'The proposal report does not add up internally': 'Regenerate the proposal report.',
+    # how payroll executed the premium
+    'The premium was not taken pre-tax in full': 'Payroll must take the whole premium pre-tax.',
+    'The premium did not come out of Medicare wages in full':
+        'Payroll must take the whole premium out of Medicare wages.',
+    'The premium is deducted but never reimbursed': 'Payroll must add the reimbursement line.',
+    'The reimbursement does not return the whole premium':
+        'Payroll must set the reimbursement to {premium_m} a month.',
+    'The reimbursement returns more than the premium':
+        'Payroll must set the reimbursement to {premium_m} a month.',
+    'Payroll withholds a fixed federal amount': 'Ask payroll why federal withholding did not move.',
+    # what is left unexplained, and the limit on the promise
+    "The proposal's federal saving does not match payroll":
+        'Check the census W-4 details and additional federal withholding against the payslip; if they match, '
+        'payroll must account for the remaining {fed_residual_abs} a month.',
+    'State withholding does not match the proposal':
+        'Check the census state marital status and withholding dependents against the payslip.',
+    'Social Security and Medicare withheld do not match the proposal':
+        'Check the census pay frequency against the payslip.',
+    'The promised federal saving is more than the federal tax available':
+        'Reduce the promised federal saving to {fed_before_m} a month.',
+}
+
+_CENSUS_STEPS = ('census', 'proposal program settings', 'Regenerate')
+
+
+def _actions(emp: EmployeeAudit) -> str:
+    """Every surviving cause contributes its action, in the order the causes are listed, once each.
+    A reader must never be told to correct data before the evidence problem above it is resolved."""
+    if emp.allotment_gap is None or emp.allotment_gap >= -CENT:
+        return ''
+    ev = _evidence(emp)
+    fmt = {k: (_m(v) if isinstance(v, (int, float)) else v) for k, v in ev.items()}
+    steps, seen = [], set()
+    for f in emp.findings:
+        tpl = _ACTIONS.get(f.label)
+        if not tpl:
+            continue
+        try:
+            step = tpl.format(**fmt)
+        except (KeyError, IndexError):
+            continue
+        if step not in seen:
+            seen.add(step)
+            steps.append(step)
+    if not steps:
+        return ''
+    if any(any(k in s for k in _CENSUS_STEPS) for s in steps):
+        steps.append('Rerun the proposal and reconcile again.')
+    if len(steps) == 1:
+        return steps[0]
+    return ' '.join(f'{i}. {s}' for i, s in enumerate(steps, 1))
 
 
 _ORDER = {
@@ -505,7 +572,14 @@ def _evidence(emp: EmployeeAudit) -> dict:
     pretax_missing_total = max(ret_missing or 0, 0) + max(ti_gap or 0, 0)
     wrong_col_amount = abs(ti_gap) if (ti_gap is not None and ti_gap < -1.0
                                        and (c.pretax_other or 0) >= abs(ti_gap) - CENT) else 0.0
-    explained_fed = TOP_FED * (pretax_missing_total + wrong_col_amount)
+    # The ceiling is itself a quantified cause: where the promise exceeds the federal tax that existed, that
+    # excess is already reported and must be deducted before any residual is called unexplained.
+    fed_before_month = per_month(b.federal, pp)
+    ceiling_excess = 0.0
+    if (a.federal == 0 and b.federal not in (None, 0) and e.federal_savings is not None
+            and fed_before_month is not None and e.federal_savings > fed_before_month):
+        ceiling_excess = e.federal_savings - fed_before_month
+    explained_fed = TOP_FED * (pretax_missing_total + wrong_col_amount) + ceiling_excess
     # a Social Security or Medicare setting that disagrees with the payslips moves the FICA comparison by the
     # whole tax on the premium; a pre-tax amount in the wrong census column moves it by both rates
     ss_setting_open = slips_present and ((not ss_on_slips and ((eng_ss or 0) > CENT or (c.socialsec or '') != 'N'))
@@ -522,10 +596,8 @@ def _evidence(emp: EmployeeAudit) -> dict:
     state_residual_abs = resid(emp.state_gap, explained_state)
     sgn = lambda gap, amt: (0.0 if gap is None else (-amt if gap < 0 else amt))
     # a ceiling is only a finding when the promise actually exceeds it
-    fed_before_m = per_month(b.federal, pp)
-    promise_over_ceiling = (a.federal == 0 and b.federal not in (None, 0)
-                            and e.federal_savings is not None and fed_before_m is not None
-                            and e.federal_savings > fed_before_m + 1.0)
+    fed_before_m = fed_before_month
+    promise_over_ceiling = ceiling_excess > 1.0
     # what payroll must do, where no census change can fix it
     pay_acts = []
     if pretax_known and (premium_pretax_gap or 0) > 1.0:

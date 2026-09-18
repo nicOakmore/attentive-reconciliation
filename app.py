@@ -108,12 +108,8 @@ def _work(job, census, rep, before, after, client, period):
             from services import prose
             para = prose.audit_paragraphs(summary, audits, client=client, period=period)
             notes.append(f'Opening paragraphs: {prose.LAST_REASON}')
-            if not para:
-                para = groq_client.summary_paragraph(dict(client=client or 'the client', employees=summary['employees'],
-                                                          reconciled=summary['matched'], attributed=summary['attributed'],
-                                                          no_cause=summary['unexplained'], missing=summary['data_missing'],
-                                                          monthly_gap=summary['total_gap'], decreases=summary['decreases'],
-                                                          causes=[[k, v['employees'], v['amount']] for k, v in summary['causes'][:4]]))
+            # No fallback prose. A paragraph that cannot be verified against the fact sheet does not go in
+            # front of a client; the document carries the tables and the per-employee blocks either way.
         except Exception as e:
             notes.append(f'Summary paragraph unavailable: {str(e)[:120]}')
         for n in notes:                      # the run's own account of what it read belongs in the log

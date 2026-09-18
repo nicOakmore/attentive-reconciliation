@@ -39,6 +39,8 @@
 .pill.red { background: var(--red-bg); color: var(--red); } .pill.grey { background: var(--grey-200); color: var(--grey-700); }
 .verdict { font-size: 13px; margin: 2px 0 10px; }
 .sentence { font-size: 13px; margin: 6px 0; }
+.steps { margin: 0 0 0 18px; padding: 0; font-size: 13px; }
+.steps li { margin: 4px 0; }
 .spinner { width: 15px; height: 15px; border: 2px solid var(--grey-300); border-top-color: var(--primary); border-radius: 50%; display: inline-block; animation: spin .8s linear infinite; vertical-align: -3px; }
 @keyframes spin { to { transform: rotate(360deg); } }
 </style>
@@ -199,8 +201,8 @@ function render(d) {
   h += '</div>';
 
   h += '<div class="card"><div class="card-title">Employees</div><table class="results-table"><thead><tr>' +
-       '<th>Employee</th><th>Verdict</th><th class="num">Promised</th><th class="num">Actual net change</th>' +
-       '<th class="num">Gap</th><th></th></tr></thead><tbody>';
+       '<th>Employee</th><th>Status</th><th class="num">Promised</th><th class="num">Actual</th>' +
+       '<th class="num">Short by</th><th></th></tr></thead><tbody>';
   d.employees.forEach((e, i) => {
     h += '<tr class="expandable" onclick="toggle(' + i + ')" id="row-' + i + '">' +
          '<td><b>' + e.name + '</b>' + (e.employee_id ? ' <span class="text-xs muted">' + e.employee_id + '</span>' : '') + '</td>' +
@@ -260,15 +262,35 @@ function box(n, l, cls) { return '<div class="summary-box ' + (cls || '') + '"><
 function detail(e) {
   const b = e.before, a = e.after, en = e.engine, c = e.census, pp = e.pay_periods;
   let h = '<div class="detail-panel">';
-  h += '<div class="verdict"><b>Verdict.</b> ' + e.verdict + '</div>';
-  const cbits = [];
-  if (c.group_health) cbits.push(money(c.group_health) + ' group health in field O');
-  if (c.pretax_other) cbits.push(money(c.pretax_other) + ' other pre-tax in field Q');
-  if (c.retirement_401k) cbits.push(money(c.retirement_401k) + ' retirement in field R');
-  h += uncertainty(e) + '<div class="detail-section"><h4>Census input</h4><div class="sentence">' +
-       (cbits.length ? 'Census pre-tax: ' + cbits.join(', ') + '.' : 'Census pre-tax: none.') +
-       (e.retirement_not_in_census ? ' Payroll takes another ' + money(e.retirement_not_in_census) + ' a month pre-tax that the census does not carry.' : '') +
-       '</div></div>';
+  h += '<div class="verdict"><b>' + e.verdict + '</b></div>';
+
+  // 1. what to do, as numbered steps
+  if (e.primary_action) {
+    h += '<div class="detail-section"><h4>What to change</h4>';
+    const steps = e.primary_action.split(/\s(?=\d+\.\s)/).filter(x => x.trim());
+    if (steps.length > 1) {
+      h += '<ol class="steps">' + steps.map(x => '<li>' + x.replace(/^\d+\.\s*/, '') + '</li>').join('') + '</ol>';
+    } else {
+      h += '<div class="diag yellow"><b>' + e.primary_action + '</b></div>';
+    }
+    h += '</div>';
+  }
+
+  // 2. why, in dependency order
+  h += '<div class="detail-section"><h4>Why</h4>';
+  (e.findings || []).forEach(f => h += '<div class="diag ' + (f.label === 'Match' ? 'green' : 'yellow') + '"><b>' +
+      f.label + (f.amount !== null && f.amount !== undefined ? ': ' + money(f.amount) + ' a month.' : '.') + '</b> ' + f.detail + '</div>');
+  h += '</div>';
+
+  // 3. the money
+  if (en.allotment !== null && e.actual_net_change !== null && en.allotment !== undefined && e.actual_net_change !== undefined) {
+    h += '<div class="detail-section"><h4>Promised against actual</h4><table class="detail-table">' +
+         '<tr><td>Promised by the proposal</td><td class="num">' + money(en.allotment) + '</td></tr>' +
+         '<tr><td>Actual change in take home pay</td><td class="num">' + money(e.actual_net_change) + '</td></tr>' +
+         '<tr><td><b>Short by</b></td><td class="num"><b>' + signed(e.allotment_gap) + '</b></td></tr></table></div>';
+  }
+
+  // 4. the payslip evidence
   const lines = [['Gross', b.gross, a.gross], ['Cafeteria deductions', b.cafeteria, a.cafeteria], ['Retirement', b.retirement, a.retirement],
     ['Premium, pre-tax', b.premium, a.premium], ['Reimbursement', b.reimbursement, a.reimbursement], ['Employee fee', b.fee, a.fee],
     ['Product sold', b.product, a.product], ['Taxable wages', b.taxable_wages, a.taxable_wages], ['Medicare gross', b.medicare_gross, a.medicare_gross],
@@ -276,32 +298,34 @@ function detail(e) {
     ['Social Security', b.social_security, a.social_security], ['Medicare', b.medicare, a.medicare], ['Net pay', b.net_pay, a.net_pay]];
   const rows = lines.filter(l => l[1] !== null && l[1] !== undefined || l[2] !== null && l[2] !== undefined);
   if (rows.length) {
-    h += '<div class="detail-section"><h4>Paycheck comparison' + (pp !== 12 ? ' (per pay, ' + pp + ' periods)' : '') + '</h4>' +
+    h += '<div class="detail-section"><h4>The two payslips side by side' + (pp !== 12 ? ' (per pay, ' + pp + ' periods)' : '') + '</h4>' +
          '<table class="detail-table"><tr><th>Payroll line</th><th class="num">Before</th><th class="num">After</th><th class="num">Change</th></tr>';
     rows.forEach(l => { const ch = (l[1] === null || l[2] === null || l[1] === undefined || l[2] === undefined) ? null : Math.round((l[2] - l[1]) * 100) / 100;
       h += '<tr><td>' + l[0] + '</td><td class="num">' + money(l[1]) + '</td><td class="num">' + money(l[2]) + '</td><td class="num">' + signed(ch) + '</td></tr>'; });
     h += '</table>';
     if (b.federal !== null && a.federal !== null && b.federal !== undefined && a.federal !== undefined)
-      h += '<div class="sentence">Federal withholding savings are ' + money(b.federal) + ' minus ' + money(a.federal) + ' = ' + money(Math.round((b.federal - a.federal) * 100) / 100) + ' per pay, ' + money(e.payroll_federal_savings) + ' a month.</div>';
+      h += '<div class="sentence">Federal tax saved: ' + money(b.federal) + ' minus ' + money(a.federal) + ' = ' + money(Math.round((b.federal - a.federal) * 100) / 100) + ' per pay, ' + money(e.payroll_federal_savings) + ' a month.</div>';
     if (b.net_pay !== null && a.net_pay !== null && b.net_pay !== undefined && a.net_pay !== undefined)
-      h += '<div class="sentence">Net pay change is ' + money(a.net_pay) + ' minus ' + money(b.net_pay) + ' = ' + money(Math.round((a.net_pay - b.net_pay) * 100) / 100) + ' per pay, ' + money(e.actual_net_change) + ' a month.</div>';
+      h += '<div class="sentence">Take home pay: ' + money(a.net_pay) + ' minus ' + money(b.net_pay) + ' = ' + money(Math.round((a.net_pay - b.net_pay) * 100) / 100) + ' per pay, ' + money(e.actual_net_change) + ' a month.</div>';
     h += '</div>';
   }
+
+  // 5. census input and where the proposal parts company with payroll
+  const cbits = [];
+  if (c.group_health) cbits.push(money(c.group_health) + ' group health in field O');
+  if (c.pretax_other) cbits.push(money(c.pretax_other) + ' other pre-tax in field Q');
+  if (c.retirement_401k) cbits.push(money(c.retirement_401k) + ' retirement in field R');
+  h += '<div class="detail-section"><h4>Census input</h4><div class="sentence">' +
+       (cbits.length ? 'Census pre-tax: ' + cbits.join(', ') + '.' : 'Census pre-tax: none.') +
+       (e.retirement_not_in_census ? ' Payroll takes another ' + money(e.retirement_not_in_census) + ' a month pre-tax that the census does not carry.' : '') +
+       '</div></div>';
   h += '<div class="detail-section"><h4>Proposal against payroll</h4><table class="detail-table">' +
        '<tr><th>Figure</th><th class="num">Proposal</th><th class="num">Payroll</th><th class="num">Difference</th></tr>' +
        tr('Federal savings', en.federal_savings, e.payroll_federal_savings) +
        tr('Taxable income before', en.taxable_income_before, b.medicare_gross === null || b.medicare_gross === undefined ? null : Math.round(b.medicare_gross * pp / 12 * 100) / 100) +
        '</table></div>';
-  if (e.primary_action) h += '<div class="detail-section"><h4>What to change</h4><div class="diag yellow"><b>' + e.primary_action + '</b></div></div>';
-  h += '<div class="detail-section"><h4>Cause</h4>';
-  (e.findings || []).forEach(f => h += '<div class="diag ' + (f.label === 'Match' ? 'green' : (f.label === 'Unattributed' ? 'red' : 'yellow')) + '"><b>' + f.label + (f.amount !== null && f.amount !== undefined ? ': ' + money(f.amount) : '') + '.</b> ' + f.detail + '</div>');
-  h += '</div>';
-  if (en.allotment !== null && e.actual_net_change !== null && en.allotment !== undefined && e.actual_net_change !== undefined) {
-    h += '<div class="detail-section"><h4>Allotment against actual net pay</h4><table class="detail-table">' +
-         '<tr><td>Promised by the proposal</td><td class="num">' + money(en.allotment) + '</td></tr>' +
-         '<tr><td>Actual net pay change</td><td class="num">' + money(e.actual_net_change) + '</td></tr>' +
-         '<tr><td><b>Gap</b></td><td class="num"><b>' + signed(e.allotment_gap) + '</b></td></tr></table></div>';
-  }
+
+  h += uncertainty(e);
   return h + '</div>';
 }
 function tr(label, eng, pay) {

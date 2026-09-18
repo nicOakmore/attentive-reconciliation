@@ -145,89 +145,67 @@ def _recon_rows(a):
 
 
 def employee_block(doc, a, client=''):
+    """Decision first: who, how much short, what to change. The proof follows in the order a reader checks it."""
     h = _p(doc, f"{a.name.upper()}{', ' + client.upper() if client else ''}", size=11, bold=True, color=NAVY, space_after=2)
     _keep(h)
-    v = _p(doc, f"Verdict: {_verdict_sentence(a)}", size=9.5, bold=True,
+    v = _p(doc, _verdict_sentence(a), size=9.5, bold=True,
            color=GREEN if a.verdict_class == 'green' else (RED if a.verdict_class == 'red' else NAVY), space_after=6)
     _keep(v)
-    _keep(_p(doc, 'What the census told the proposal', size=9.5, bold=True, color=NAVY, space_after=2))
-    _p(doc, _census_sentence(a), space_after=6)
+
+    # 1. what to do
+    if getattr(a, 'primary_action', ''):
+        _keep(_p(doc, 'What to change', size=9.5, bold=True, color=NAVY, space_after=2))
+        _p(doc, a.primary_action, bold=True, space_after=8)
+
+    # 2. why, cause by cause, in dependency order
+    named = [f for f in a.findings if f.label not in ('Match', 'No cause could be established',
+                                                      'No payslip found for this employee')]
+    _keep(_p(doc, 'Why', size=9.5, bold=True, color=NAVY, space_after=2))
+    if a.verdict_class == 'green':
+        _p(doc, 'No shortfall: the employee takes home at least what was promised.', space_after=8)
+    elif any(f.label == 'No payslip found for this employee' for f in a.findings):
+        _p(doc, 'No payroll statement in the packs matched this employee. This is a files gap, not a finding '
+                'against the employee.', space_after=8)
+    elif not named:
+        _p(doc, f"The files establish a difference of {money(a.allotment_gap)} a month and do not establish its "
+                f"cause.", space_after=8)
+    else:
+        for i, f in enumerate(named, 1):
+            head = f"{f.label}: {money(f.amount)} a month." if f.amount is not None else f"{f.label}."
+            _p(doc, f"{i}. {head} {f.detail}", space_after=3)
+        _p(doc, '', space_after=4)
+
+    # 3. the money, stated once
+    if a.engine.allotment is not None and a.actual_net_change is not None:
+        _keep(_p(doc, 'Promised against actual', size=9.5, bold=True, color=NAVY, space_after=2))
+        _table(doc, ['Figure', 'Amount'], [['Promised by the proposal', money(a.engine.allotment)],
+                                           ['Actual change in take home pay', money(a.actual_net_change)],
+                                           ['Short by', signed(a.allotment_gap)]], [5.3, 1.6])
+        _p(doc, '', space_after=6)
+    elif a.engine.allotment is None or a.actual_net_change is None:
+        miss = 'the proposal allotment' if a.engine.allotment is None else 'net pay on both payslips'
+        _p(doc, f"Promised against actual cannot be compared: {miss} is unavailable.", space_after=6)
+
+    # 4. the payslip evidence behind those figures
     rows = _paycheck_rows(a)
     if rows:
         _keep(_p(doc, 'The two payslips side by side', size=9.5, bold=True, color=NAVY, space_after=2))
         _table(doc, ['Line on the payslip', 'Before', 'After', 'Change'], rows, [2.9, 1.2, 1.2, 1.1])
         _p(doc, '', space_after=2)
         _arithmetic(doc, a)
+
+    # 5. what the census gave the proposal, and where the proposal and the payslips part company
+    _keep(_p(doc, 'Census input', size=9.5, bold=True, color=NAVY, space_after=2))
+    _p(doc, _census_sentence(a), space_after=6)
     rr = _recon_rows(a)
     if rr:
-        _keep(_p(doc, 'What the proposal expected, against the payslips', size=9.5, bold=True, color=NAVY, space_after=2))
+        _keep(_p(doc, 'Proposal against payroll', size=9.5, bold=True, color=NAVY, space_after=2))
         _table(doc, ['Figure', 'Proposal', 'Payslips', 'Difference'], rr, [2.9, 1.2, 1.2, 1.1])
         _p(doc, '', space_after=2)
-        if a.engine.taxable_income_before is not None and a.before.medicare_gross is not None:
-            gap = a.ti_before_gap
-            if gap is not None and abs(gap) <= 0.02:
-                _p(doc, f"The proposal started from {money(a.engine.taxable_income_before)} a month of income, which "
-                    f"matches the payslip.")
-            else:
-                _p(doc, f"The proposal started from {money(a.engine.taxable_income_before)} a month of income where "
-                        f"the payslip taxes "
-                        f"{money(round((a.before.taxable_wages or 0) * a.pay_periods / 12, 2))}, a difference of "
-                        f"{money(gap)}.")
-    if getattr(a, 'primary_action', ''):
-        _keep(_p(doc, 'What to change', size=9.5, bold=True, color=NAVY, space_after=2))
-        _p(doc, a.primary_action, bold=True, space_after=6)
-    _keep(_p(doc, 'Why', size=9.5, bold=True, color=NAVY, space_after=2))
-    named = [f for f in a.findings if f.label not in ('Match', 'No cause could be established', 'No payslip found for this employee')]
-    if a.verdict_class == 'green':
-        _p(doc, 'No shortfall: the employee takes home at least what was promised.')
-    elif any(f.label == 'No payslip found for this employee' for f in a.findings):
-        _p(doc, 'No payroll statement in the packs matched this employee, so the proposal figures stand unreconciled. '
-                'This is a files gap, not a finding against the employee.')
-    elif not named:
-        _p(doc, f"The submitted data establishes a difference of {money(a.allotment_gap)} and does not establish its cause.")
-    else:
-        if len(named) > 1:
-            _table(doc, ['Cause', 'Amount'], [[f.label, money(f.amount)] for f in named], [5.3, 1.6])
-            _p(doc, '', space_after=2)
-        for f in named:
-            _p(doc, f"{f.label}: {money(f.amount)}. {f.detail}")
-    if a.engine.allotment is not None and a.actual_net_change is not None:
-        _keep(_p(doc, 'What was promised, against what the employee got', size=9.5, bold=True, color=NAVY, space_after=2))
-        _table(doc, ['Figure', 'Amount'], [['Promised by the proposal', money(a.engine.allotment)],
-                                           ['Actual change in take home pay', money(a.actual_net_change)],
-                                           ['Gap', signed(a.allotment_gap)]], [5.3, 1.6])
-        _p(doc, '', space_after=2)
-        if abs(a.allotment_gap or 0) <= 0.02:
-            _p(doc, f"The proposal promised {money(a.engine.allotment)} a month and that is what the payslips show.")
-        else:
-            # One finding is only presented as the cause of the whole gap when it is the only finding open. Where
-            # several are open, the report says what is established and stops short of apportioning the gap.
-            open_findings = [f for f in named]
-            head = (f"The proposal promised {money(a.engine.allotment)} a month. The payslips show "
-                    f"{money(a.actual_net_change)}. The difference is {money(a.allotment_gap)}. ")
-            if len(open_findings) == 1:
-                f = open_findings[0]
-                _p(doc, head + f"The one thing the files show is "
-                              f"{f.label.lower()}{', ' + money(f.amount) + ' a month' if f.amount is not None else ''}. "
-                              f"How much of the difference that accounts for can only be seen by correcting it and "
-                              f"running the proposal again.")
-            elif open_findings:
-                bits = ', '.join(f"{f.label.lower()}{' of ' + money(f.amount) if f.amount is not None else ''}"
-                                 for f in open_findings)
-                _p(doc, head + f"More than one thing is going on here: {bits}. This tool will not guess how much "
-                              f"of the difference belongs to each, so correct the census, run the proposal again "
-                              f"and see what is left.")
-            else:
-                _p(doc, head + 'The files provided do not show what caused it.')
-    elif a.engine.allotment is None or a.actual_net_change is None:
-        miss = 'the proposal allotment' if a.engine.allotment is None else 'net pay on both statements'
-        _p(doc, f"Allotment against actual net pay cannot be reconciled because {miss} is unavailable.")
+
     _uncertainty_block(doc, a)
     res = _resolution(a)
-    if res:
-        _p(doc, res, bold=True, space_after=14)
-    else:
-        _p(doc, '', space_after=14)
+    _p(doc, res if res else '', bold=bool(res), space_after=14)
 
 
 def _uncertainty_block(doc, a):

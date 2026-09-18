@@ -53,7 +53,15 @@ def _facts(summary, audits, client, period):
 
 
 def _numbers(text):
-    return set(re.findall(r'\d+(?:\.\d+)?', (text or '').replace(',', '')))
+    """Numbers as values, not as strings: 2967.30 and 2967.3 are the same figure, and a reader
+    writing a round number with two decimals has not invented anything."""
+    out = set()
+    for m in re.findall(r'\d+(?:\.\d+)?', (text or '').replace(',', '')):
+        try:
+            out.add(round(float(m), 2))
+        except ValueError:
+            pass
+    return out
 
 
 LAST_REASON = ''
@@ -81,6 +89,13 @@ def audit_paragraphs(summary, audits, client='', period='', paragraphs=3):
         + json.dumps(facts, default=str))
     try:
         text = G._text(prompt, max_tokens=1400)
+        extra = sorted(_numbers(text) - _numbers(json.dumps(facts, default=str)))
+        if text and extra:
+            # one retry, told exactly which figures were not in the sheet
+            text = G._text(prompt + '\n\nYour previous answer used figures that are not in the fact sheet: '
+                           + ', '.join(str(x) for x in extra[:8])
+                           + '. Write it again using only figures that appear above, copied exactly.',
+                           max_tokens=1400)
     except Exception as exc:
         LAST_REASON = f'model call failed: {type(exc).__name__}: {str(exc)[:120]}'
         return ''

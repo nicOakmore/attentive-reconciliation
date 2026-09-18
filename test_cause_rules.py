@@ -50,7 +50,7 @@ e = base(); e.engine.ss_savings = 72.73; e.engine.allotment = 146.51
 a = audit_employee(e)
 amt = [f.amount for f in a.findings
        if f.label == 'The proposal counts Social Security savings this payroll never pays']
-check('ss_on amount', amt and abs(amt[0] + 72.73) < 0.01, str(amt))
+check('ss_on amount is positive', amt and abs(amt[0] - 72.73) < 0.01, str(amt))
 
 # 3. payroll deducts SS the proposal ignores
 e = base()
@@ -68,7 +68,7 @@ check('fee fires', 'The employee fee in the proposal is not the fee payroll dedu
 e = base(); e.after.fee = 130; e.after.net_pay = 4557.78
 amt = [f.amount for f in audit_employee(e).findings
        if f.label == 'The employee fee in the proposal is not the fee payroll deducts']
-check('fee amount -16', amt and abs(amt[0] + 16.0) < 0.01, str(amt))
+check('fee amount is positive', amt and abs(amt[0] - 16.0) < 0.01, str(amt))
 
 # the green gate: an employee who takes home MORE than promised is green, no cause hunt
 e = base()
