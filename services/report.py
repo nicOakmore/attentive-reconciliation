@@ -1,5 +1,5 @@
 """The docx. Front summary once, then one fixed block per employee in the agreed order:
-verdict, census input, paycheck comparison, arithmetic, engine reconciliation, cause, allotment, resolution.
+verdict, census input, paycheck comparison, arithmetic, proposal against payroll, cause, allotment, resolution.
 Only lines the employee actually has are printed. No sentence states a cause without an amount behind it.
 """
 import io
@@ -178,8 +178,8 @@ def employee_block(doc, a, client=''):
     if a.verdict_class == 'green':
         _p(doc, 'No shortfall: the employee takes home at least what was promised.')
     elif any(f.label == 'No payslip found for this employee' for f in a.findings):
-        _p(doc, 'No payroll statement in the packs supplied matched this employee, so the engine figures stand '
-                'unreconciled. This is a coverage limit of the files, not a discrepancy.')
+        _p(doc, 'No payroll statement in the packs matched this employee, so the proposal figures stand unreconciled. '
+                'This is a files gap, not a finding against the employee.')
     elif not named:
         _p(doc, f"The submitted data establishes a difference of {money(a.allotment_gap)} and does not establish its cause.")
     else:
@@ -331,7 +331,7 @@ def build(audits, summary, notes, client='', files=None, ai_paragraph='', period
     _p(doc, 'What was checked, and how', size=12, bold=True, color=NAVY, space_after=4)
     for n in (files or []) + notes:
         _p(doc, n, size=9, color=GREY, space_after=2)
-    _p(doc, 'Census fields are the engine inputs. The payroll before the premium is the baseline and the payroll after '
+    _p(doc, 'Census fields are the proposal inputs. The payroll before the premium is the baseline and the payroll after '
             'it is the comparison. Payroll federal withholding savings are the federal withholding on the before '
             'statement less the federal withholding on the after statement, converted to the report period by the '
             'pay frequency carried on the census. The employee allotment comes from the proposal report. Net pay is '
@@ -353,30 +353,18 @@ def build(audits, summary, notes, client='', files=None, ai_paragraph='', period
             ['Payslips that belong to nobody on the census, set aside', pop.get('unmatched_statements', 0)]],
            [5.2, 1.7])
     _p(doc, '', space_after=4)
-    _p(doc, 'Statements are matched to employees by payroll employee number first, then by last name with the first '
-            'three letters of the first name. A statement that matches no employee in the population is excluded and '
-            'counted above; it is never assigned to an employee on a partial match.', size=9, color=GREY, space_after=8)
-    _p(doc, 'The statements print the employee\'s filing status, multiple jobs indicator, children under 17, other '
-            'dependents, other income, other deductions and additional withholding, and these are compared with the '
-            'census. The statements reviewed do not print an exemption from withholding indicator. Accordingly this '
-            'review does not compare or conclude on that W-4 field; its presence or value is outside the available '
-            'statement evidence.', size=9, color=GREY, space_after=8)
-    _p(doc, 'Reading the statements', size=12, bold=True, color=NAVY, space_after=4)
-    _p(doc, 'Each page is read once and the reading is kept, with the words and their positions behind every '
-            'figure, so a page that appears in a later pack is not read again and a figure can be traced to the '
-            'words it came from. A figure corrected by a reviewer is recorded against that page as a correction: '
-            'the original machine reading is kept, the correction is applied on top of it, and both are reported.',
+    _p(doc, 'Statements match employees by payroll employee number, then by last name with the first three letters '
+            'of the first name. A statement matching nobody is set aside, never assigned on a partial match.',
          size=9, color=GREY, space_after=8)
-    _p(doc, 'The statements in these packs are scanned images, so every figure is read by optical character '
-            'recognition and then located by its printed label. Net pay appears four times on the same statement: '
-            'the net pay line, the direct deposit total, the sum of the individual deposit rows, and gross pay less '
-            'total deductions. These are four representations of one document, not four independent sources. Where '
-            'at least two of them agree, the agreed figure is accepted as the extracted net pay for the '
-            'reconciliation. That is an extraction control only: it establishes that the readings are consistent '
-            'across repeated printings of the same figure, not that the payroll statement itself is correct. Where '
-            'no two agree, no net pay is accepted and the employee is reported unverified. Every figure the tool takes from '
-            'anywhere other than its own printed line is recorded against that employee in the run notes.',
-         size=9, color=GREY, space_after=14)
+    _p(doc, 'Filing status, multiple jobs, dependents and additional withholding are compared with the census. The '
+            'statements do not print an exemption indicator, so that field is not reviewed.',
+         size=9, color=GREY, space_after=8)
+    _p(doc, 'How the figures were read', size=12, bold=True, color=NAVY, space_after=4)
+    _p(doc, 'The statements are scanned images. Each figure is read by its printed label and each page is read once '
+            'and kept, so a figure traces back to the words it came from.', size=9, color=GREY, space_after=8)
+    _p(doc, 'Net pay is printed four times on a statement: the net pay line, the deposit total, the sum of the '
+            'deposit rows, and gross less total deductions. Where two agree, that figure is used. Where none agree, '
+            'no net pay is taken and the employee is reported unverified.', size=9, color=GREY, space_after=14)
     for a in audits:
         employee_block(doc, a, client=client)
     buf = io.BytesIO(); doc.save(buf); buf.seek(0)

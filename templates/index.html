@@ -199,7 +199,7 @@ function render(d) {
   h += '</div>';
 
   h += '<div class="card"><div class="card-title">Employees</div><table class="results-table"><thead><tr>' +
-       '<th>Employee</th><th>Verdict</th><th class="num">Engine allotment</th><th class="num">Actual net change</th>' +
+       '<th>Employee</th><th>Verdict</th><th class="num">Promised</th><th class="num">Actual net change</th>' +
        '<th class="num">Gap</th><th></th></tr></thead><tbody>';
   d.employees.forEach((e, i) => {
     h += '<tr class="expandable" onclick="toggle(' + i + ')" id="row-' + i + '">' +
@@ -261,10 +261,13 @@ function detail(e) {
   const b = e.before, a = e.after, en = e.engine, c = e.census, pp = e.pay_periods;
   let h = '<div class="detail-panel">';
   h += '<div class="verdict"><b>Verdict.</b> ' + e.verdict + '</div>';
+  const cbits = [];
+  if (c.group_health) cbits.push(money(c.group_health) + ' group health in field O');
+  if (c.pretax_other) cbits.push(money(c.pretax_other) + ' other pre-tax in field Q');
+  if (c.retirement_401k) cbits.push(money(c.retirement_401k) + ' retirement in field R');
   h += uncertainty(e) + '<div class="detail-section"><h4>Census input</h4><div class="sentence">' +
-       'Census pre-tax total ' + money((c.pretax_other || 0) + (c.group_health || 0) + (c.retirement_401k || 0)) +
-       (c.pretax_other !== null && c.pretax_other !== undefined ? ' (field Q ' + money(c.pretax_other) + ')' : '') +
-       (e.retirement_not_in_census ? '. Payroll reduces federal taxable wages by a further ' + money(e.retirement_not_in_census) + ' a month for retirement, not carried in any census field.' : '.') +
+       (cbits.length ? 'Census pre-tax: ' + cbits.join(', ') + '.' : 'Census pre-tax: none.') +
+       (e.retirement_not_in_census ? ' Payroll takes another ' + money(e.retirement_not_in_census) + ' a month pre-tax that the census does not carry.' : '') +
        '</div></div>';
   const lines = [['Gross', b.gross, a.gross], ['Cafeteria deductions', b.cafeteria, a.cafeteria], ['Retirement', b.retirement, a.retirement],
     ['Premium, pre-tax', b.premium, a.premium], ['Reimbursement', b.reimbursement, a.reimbursement], ['Employee fee', b.fee, a.fee],
@@ -284,8 +287,8 @@ function detail(e) {
       h += '<div class="sentence">Net pay change is ' + money(a.net_pay) + ' minus ' + money(b.net_pay) + ' = ' + money(Math.round((a.net_pay - b.net_pay) * 100) / 100) + ' per pay, ' + money(e.actual_net_change) + ' a month.</div>';
     h += '</div>';
   }
-  h += '<div class="detail-section"><h4>Engine reconciliation</h4><table class="detail-table">' +
-       '<tr><th>Metric</th><th class="num">Engine</th><th class="num">Payroll</th><th class="num">Difference</th></tr>' +
+  h += '<div class="detail-section"><h4>Proposal against payroll</h4><table class="detail-table">' +
+       '<tr><th>Figure</th><th class="num">Proposal</th><th class="num">Payroll</th><th class="num">Difference</th></tr>' +
        tr('Federal savings', en.federal_savings, e.payroll_federal_savings) +
        tr('Taxable income before', en.taxable_income_before, b.medicare_gross === null || b.medicare_gross === undefined ? null : Math.round(b.medicare_gross * pp / 12 * 100) / 100) +
        '</table></div>';
@@ -294,7 +297,7 @@ function detail(e) {
   h += '</div>';
   if (en.allotment !== null && e.actual_net_change !== null && en.allotment !== undefined && e.actual_net_change !== undefined) {
     h += '<div class="detail-section"><h4>Allotment against actual net pay</h4><table class="detail-table">' +
-         '<tr><td>Engine allotment</td><td class="num">' + money(en.allotment) + '</td></tr>' +
+         '<tr><td>Promised by the proposal</td><td class="num">' + money(en.allotment) + '</td></tr>' +
          '<tr><td>Actual net pay change</td><td class="num">' + money(e.actual_net_change) + '</td></tr>' +
          '<tr><td><b>Gap</b></td><td class="num"><b>' + signed(e.allotment_gap) + '</b></td></tr></table></div>';
   }
