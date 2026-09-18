@@ -287,6 +287,27 @@ def _resolution(a):
         if f.label == 'The W-4 on payroll differs from the census':
             return ('What to do: agree which W-4 details are current, payroll\'s or the census\'s, correct the '
                     'census and run the proposal again.')
+        if f.label == 'The proposal counts Social Security savings this payroll never pays':
+            return ('What to do: switch Social Security off for this employee, in the census SocialSec column or '
+                    'in the proposal settings, and run the proposal again. This payroll deducts no Social Security, '
+                    'so no saving on it can be promised.')
+        if f.label == 'The payroll pays Social Security the proposal ignores':
+            return ('What to do: switch Social Security on for this employee in the census SocialSec column or the '
+                    'proposal settings, and run the proposal again. The payslips deduct it, so the premium saves it.')
+        if f.label == 'The employee fee in the proposal is not the fee payroll deducts':
+            return ('What to do: set the employee fee in the proposal\'s program settings to the fee payroll '
+                    'actually deducts, and run the proposal again. The two promises cannot agree until the fee is '
+                    'the same in both places.')
+        if f.label == 'A deduction sits in the wrong census column':
+            return ('What to do: move the retirement amount out of the Other pre-tax census column into the '
+                    '401-k/IRA column and run the proposal again. The Other column takes the amount out of Social '
+                    'Security and Medicare wages, which payroll does not do for retirement.')
+        if f.label == 'The proposal calculated on no income at all':
+            return ('What to do: the proposal worked this employee out on zero income. Check the salary on the '
+                    'census and the buffer in the proposal settings, then run the proposal again.')
+        if f.label == 'The premium on the payslip is not the premium in the proposal':
+            return ('What to do: make the premium on the payslip and the premium in the proposal the same, then '
+                    'run both again. Nothing computed from two different premiums can agree.')
     labels = {f.label for f in a.findings}
     if 'The statement does not add up' in labels:
         return ('What to do: look at this employee\'s two payslips. Their own figures do not add up, so nothing '

@@ -1,0 +1,1168 @@
+{
+ "export": {
+  "data": {
+   "rules": [
+    {
+     "ruleAlias": "causeAttribution",
+     "type": "decision-table",
+     "decisionTable": {
+      "columns": [
+       {
+        "columnId": "in_ret_named_known",
+        "type": "input",
+        "condition": {
+         "inputVariable": "ret_named_known"
+        }
+       },
+       {
+        "columnId": "in_ret_missing_abs",
+        "type": "input",
+        "condition": {
+         "inputVariable": "ret_missing_abs"
+        }
+       },
+       {
+        "columnId": "in_ret_unnamed_abs",
+        "type": "input",
+        "condition": {
+         "inputVariable": "ret_unnamed_abs"
+        }
+       },
+       {
+        "columnId": "in_ret_zero",
+        "type": "input",
+        "condition": {
+         "inputVariable": "ret_zero"
+        }
+       },
+       {
+        "columnId": "in_ti_gap",
+        "type": "input",
+        "condition": {
+         "inputVariable": "ti_gap"
+        }
+       },
+       {
+        "columnId": "in_wrong_col_match",
+        "type": "input",
+        "condition": {
+         "inputVariable": "wrong_col_match"
+        }
+       },
+       {
+        "columnId": "in_slips_present",
+        "type": "input",
+        "condition": {
+         "inputVariable": "slips_present"
+        }
+       },
+       {
+        "columnId": "in_ss_on_slips",
+        "type": "input",
+        "condition": {
+         "inputVariable": "ss_on_slips"
+        }
+       },
+       {
+        "columnId": "in_eng_ss",
+        "type": "input",
+        "condition": {
+         "inputVariable": "eng_ss"
+        }
+       },
+       {
+        "columnId": "in_eng_ss_known",
+        "type": "input",
+        "condition": {
+         "inputVariable": "eng_ss_known"
+        }
+       },
+       {
+        "columnId": "in_pay_ss_sav",
+        "type": "input",
+        "condition": {
+         "inputVariable": "pay_ss_sav"
+        }
+       },
+       {
+        "columnId": "in_fee_known",
+        "type": "input",
+        "condition": {
+         "inputVariable": "fee_known"
+        }
+       },
+       {
+        "columnId": "in_fee_gap_abs",
+        "type": "input",
+        "condition": {
+         "inputVariable": "fee_gap_abs"
+        }
+       },
+       {
+        "columnId": "in_eng_ti_known",
+        "type": "input",
+        "condition": {
+         "inputVariable": "eng_ti_known"
+        }
+       },
+       {
+        "columnId": "in_eng_ti_zero",
+        "type": "input",
+        "condition": {
+         "inputVariable": "eng_ti_zero"
+        }
+       },
+       {
+        "columnId": "in_census_gross",
+        "type": "input",
+        "condition": {
+         "inputVariable": "census_gross"
+        }
+       },
+       {
+        "columnId": "in_premium_known",
+        "type": "input",
+        "condition": {
+         "inputVariable": "premium_known"
+        }
+       },
+       {
+        "columnId": "in_premium_gap_abs",
+        "type": "input",
+        "condition": {
+         "inputVariable": "premium_gap_abs"
+        }
+       },
+       {
+        "columnId": "in_fixed_fed",
+        "type": "input",
+        "condition": {
+         "inputVariable": "fixed_fed"
+        }
+       },
+       {
+        "columnId": "in_fed_zero",
+        "type": "input",
+        "condition": {
+         "inputVariable": "fed_zero"
+        }
+       },
+       {
+        "columnId": "in_w4_diff",
+        "type": "input",
+        "condition": {
+         "inputVariable": "w4_diff"
+        }
+       },
+       {
+        "columnId": "in_gross_moved_abs",
+        "type": "input",
+        "condition": {
+         "inputVariable": "gross_moved_abs"
+        }
+       },
+       {
+        "columnId": "in_identity_broken",
+        "type": "input",
+        "condition": {
+         "inputVariable": "identity_broken"
+        }
+       },
+       {
+        "columnId": "in_identity_explained",
+        "type": "input",
+        "condition": {
+         "inputVariable": "identity_explained"
+        }
+       },
+       {
+        "columnId": "in_fee_from_stmt",
+        "type": "input",
+        "condition": {
+         "inputVariable": "fee_from_stmt"
+        }
+       },
+       {
+        "columnId": "in_fed_in_doubt",
+        "type": "input",
+        "condition": {
+         "inputVariable": "fed_in_doubt"
+        }
+       },
+       {
+        "columnId": "in_federal_gap_abs",
+        "type": "input",
+        "condition": {
+         "inputVariable": "federal_gap_abs"
+        }
+       },
+       {
+        "columnId": "in_state_gap_abs",
+        "type": "input",
+        "condition": {
+         "inputVariable": "state_gap_abs"
+        }
+       },
+       {
+        "columnId": "in_state_is_mo",
+        "type": "input",
+        "condition": {
+         "inputVariable": "state_is_mo"
+        }
+       },
+       {
+        "columnId": "in_fica_gap_abs",
+        "type": "input",
+        "condition": {
+         "inputVariable": "fica_gap_abs"
+        }
+       },
+       {
+        "columnId": "in_ss_mismatch",
+        "type": "input",
+        "condition": {
+         "inputVariable": "ss_mismatch"
+        }
+       },
+       {
+        "columnId": "out_label",
+        "type": "output",
+        "columnOutput": {
+         "outputVariable": "label"
+        }
+       },
+       {
+        "columnId": "out_amount",
+        "type": "output",
+        "columnOutput": {
+         "outputVariable": "amount"
+        }
+       },
+       {
+        "columnId": "out_detail",
+        "type": "output",
+        "columnOutput": {
+         "outputVariable": "detail"
+        }
+       }
+      ],
+      "rows": [
+       {
+        "name": "retirement named, fully explained",
+        "active": true,
+        "cells": [
+         {
+          "column": "in_ret_named_known",
+          "scalarCondition": {
+           "operator": "=",
+           "value": "Y"
+          }
+         },
+         {
+          "column": "in_ret_missing_abs",
+          "scalarCondition": {
+           "operator": ">",
+           "value": 0.02
+          }
+         },
+         {
+          "column": "in_ret_unnamed_abs",
+          "scalarCondition": {
+           "operator": "<=",
+           "value": 0.02
+          }
+         },
+         {
+          "column": "out_label",
+          "outputScalarValue": {
+           "type": "common",
+           "value": "Retirement deduction missing from the census"
+          }
+         },
+         {
+          "column": "out_amount",
+          "outputScalarValue": {
+           "type": "function",
+           "value": "{ret_missing}"
+          }
+         },
+         {
+          "column": "out_detail",
+          "outputScalarValue": {
+           "type": "common",
+           "value": "ret_named_exact"
+          }
+         }
+        ]
+       },
+       {
+        "name": "retirement named, with a further unnamed pre-tax deduction",
+        "active": true,
+        "cells": [
+         {
+          "column": "in_ret_named_known",
+          "scalarCondition": {
+           "operator": "=",
+           "value": "Y"
+          }
+         },
+         {
+          "column": "in_ret_missing_abs",
+          "scalarCondition": {
+           "operator": ">",
+           "value": 0.02
+          }
+         },
+         {
+          "column": "in_ret_unnamed_abs",
+          "scalarCondition": {
+           "operator": ">",
+           "value": 0.02
+          }
+         },
+         {
+          "column": "out_label",
+          "outputScalarValue": {
+           "type": "common",
+           "value": "Retirement deduction missing from the census"
+          }
+         },
+         {
+          "column": "out_amount",
+          "outputScalarValue": {
+           "type": "function",
+           "value": "{ret_missing}"
+          }
+         },
+         {
+          "column": "out_detail",
+          "outputScalarValue": {
+           "type": "common",
+           "value": "ret_named_plus"
+          }
+         }
+        ]
+       },
+       {
+        "name": "pre-tax reduction of federal wages the statement does not name",
+        "active": true,
+        "cells": [
+         {
+          "column": "in_ret_named_known",
+          "scalarCondition": {
+           "operator": "=",
+           "value": "N"
+          }
+         },
+         {
+          "column": "in_ret_missing_abs",
+          "scalarCondition": {
+           "operator": ">",
+           "value": 0.02
+          }
+         },
+         {
+          "column": "out_label",
+          "outputScalarValue": {
+           "type": "common",
+           "value": "A pre-tax deduction is missing from the census"
+          }
+         },
+         {
+          "column": "out_amount",
+          "outputScalarValue": {
+           "type": "function",
+           "value": "{ret_missing}"
+          }
+         },
+         {
+          "column": "out_detail",
+          "outputScalarValue": {
+           "type": "common",
+           "value": "ret_unnamed"
+          }
+         }
+        ]
+       },
+       {
+        "name": "proposal starts from more income than the payslip",
+        "active": true,
+        "cells": [
+         {
+          "column": "in_ti_gap",
+          "scalarCondition": {
+           "operator": ">",
+           "value": 0.02
+          }
+         },
+         {
+          "column": "in_ret_zero",
+          "scalarCondition": {
+           "operator": "=",
+           "value": "Y"
+          }
+         },
+         {
+          "column": "out_label",
+          "outputScalarValue": {
+           "type": "common",
+           "value": "A pre-tax deduction is missing from the census"
+          }
+         },
+         {
+          "column": "out_amount",
+          "outputScalarValue": {
+           "type": "function",
+           "value": "{ti_gap}"
+          }
+         },
+         {
+          "column": "out_detail",
+          "outputScalarValue": {
+           "type": "common",
+           "value": "pretax_missing"
+          }
+         }
+        ]
+       },
+       {
+        "name": "a deduction was entered in the wrong census column",
+        "active": true,
+        "cells": [
+         {
+          "column": "in_ti_gap",
+          "scalarCondition": {
+           "operator": "<",
+           "value": -1.0
+          }
+         },
+         {
+          "column": "in_wrong_col_match",
+          "scalarCondition": {
+           "operator": "=",
+           "value": "Y"
+          }
+         },
+         {
+          "column": "out_label",
+          "outputScalarValue": {
+           "type": "common",
+           "value": "A deduction sits in the wrong census column"
+          }
+         },
+         {
+          "column": "out_amount",
+          "outputScalarValue": {
+           "type": "function",
+           "value": "{ti_gap}"
+          }
+         },
+         {
+          "column": "out_detail",
+          "outputScalarValue": {
+           "type": "common",
+           "value": "wrong_column"
+          }
+         }
+        ]
+       },
+       {
+        "name": "proposal starts from less income than the payslip, cause unknown",
+        "active": true,
+        "cells": [
+         {
+          "column": "in_ti_gap",
+          "scalarCondition": {
+           "operator": "<",
+           "value": -1.0
+          }
+         },
+         {
+          "column": "in_wrong_col_match",
+          "scalarCondition": {
+           "operator": "=",
+           "value": "N"
+          }
+         },
+         {
+          "column": "out_label",
+          "outputScalarValue": {
+           "type": "common",
+           "value": "The proposal starts from less income than the payslip shows"
+          }
+         },
+         {
+          "column": "out_amount",
+          "outputScalarValue": {
+           "type": "function",
+           "value": "{ti_gap}"
+          }
+         },
+         {
+          "column": "out_detail",
+          "outputScalarValue": {
+           "type": "common",
+           "value": "ti_neg"
+          }
+         }
+        ]
+       },
+       {
+        "name": "Social Security savings claimed on a payroll that never deducts it",
+        "active": true,
+        "cells": [
+         {
+          "column": "in_slips_present",
+          "scalarCondition": {
+           "operator": "=",
+           "value": "Y"
+          }
+         },
+         {
+          "column": "in_ss_on_slips",
+          "scalarCondition": {
+           "operator": "=",
+           "value": "N"
+          }
+         },
+         {
+          "column": "in_eng_ss",
+          "scalarCondition": {
+           "operator": ">",
+           "value": 0.02
+          }
+         },
+         {
+          "column": "out_label",
+          "outputScalarValue": {
+           "type": "common",
+           "value": "The proposal counts Social Security savings this payroll never pays"
+          }
+         },
+         {
+          "column": "out_amount",
+          "outputScalarValue": {
+           "type": "function",
+           "value": "0 - {eng_ss}"
+          }
+         },
+         {
+          "column": "out_detail",
+          "outputScalarValue": {
+           "type": "common",
+           "value": "ss_on"
+          }
+         }
+        ]
+       },
+       {
+        "name": "payroll deducts Social Security the proposal ignores",
+        "active": true,
+        "cells": [
+         {
+          "column": "in_slips_present",
+          "scalarCondition": {
+           "operator": "=",
+           "value": "Y"
+          }
+         },
+         {
+          "column": "in_ss_on_slips",
+          "scalarCondition": {
+           "operator": "=",
+           "value": "Y"
+          }
+         },
+         {
+          "column": "in_eng_ss_known",
+          "scalarCondition": {
+           "operator": "=",
+           "value": "Y"
+          }
+         },
+         {
+          "column": "in_eng_ss",
+          "scalarCondition": {
+           "operator": "<=",
+           "value": 0.02
+          }
+         },
+         {
+          "column": "out_label",
+          "outputScalarValue": {
+           "type": "common",
+           "value": "The payroll pays Social Security the proposal ignores"
+          }
+         },
+         {
+          "column": "out_amount",
+          "outputScalarValue": {
+           "type": "function",
+           "value": "{pay_ss_sav}"
+          }
+         },
+         {
+          "column": "out_detail",
+          "outputScalarValue": {
+           "type": "common",
+           "value": "ss_off"
+          }
+         }
+        ]
+       },
+       {
+        "name": "the fee in the proposal is not the fee payroll deducts",
+        "active": true,
+        "cells": [
+         {
+          "column": "in_fee_known",
+          "scalarCondition": {
+           "operator": "=",
+           "value": "Y"
+          }
+         },
+         {
+          "column": "in_fee_gap_abs",
+          "scalarCondition": {
+           "operator": ">",
+           "value": 0.02
+          }
+         },
+         {
+          "column": "out_label",
+          "outputScalarValue": {
+           "type": "common",
+           "value": "The employee fee in the proposal is not the fee payroll deducts"
+          }
+         },
+         {
+          "column": "out_amount",
+          "outputScalarValue": {
+           "type": "function",
+           "value": "0 - {fee_gap}"
+          }
+         },
+         {
+          "column": "out_detail",
+          "outputScalarValue": {
+           "type": "common",
+           "value": "fee_mismatch"
+          }
+         }
+        ]
+       },
+       {
+        "name": "the proposal calculated on no income at all",
+        "active": true,
+        "cells": [
+         {
+          "column": "in_eng_ti_known",
+          "scalarCondition": {
+           "operator": "=",
+           "value": "Y"
+          }
+         },
+         {
+          "column": "in_eng_ti_zero",
+          "scalarCondition": {
+           "operator": "=",
+           "value": "Y"
+          }
+         },
+         {
+          "column": "in_census_gross",
+          "scalarCondition": {
+           "operator": ">",
+           "value": 0
+          }
+         },
+         {
+          "column": "out_label",
+          "outputScalarValue": {
+           "type": "common",
+           "value": "The proposal calculated on no income at all"
+          }
+         },
+         {
+          "column": "out_amount",
+          "outputScalarValue": {
+           "type": "function",
+           "value": "{gap}"
+          }
+         },
+         {
+          "column": "out_detail",
+          "outputScalarValue": {
+           "type": "common",
+           "value": "salary_zero"
+          }
+         }
+        ]
+       },
+       {
+        "name": "the premium on the payslip is not the premium in the proposal",
+        "active": true,
+        "cells": [
+         {
+          "column": "in_premium_known",
+          "scalarCondition": {
+           "operator": "=",
+           "value": "Y"
+          }
+         },
+         {
+          "column": "in_premium_gap_abs",
+          "scalarCondition": {
+           "operator": ">",
+           "value": 0.02
+          }
+         },
+         {
+          "column": "out_label",
+          "outputScalarValue": {
+           "type": "common",
+           "value": "The premium on the payslip is not the premium in the proposal"
+          }
+         },
+         {
+          "column": "out_amount",
+          "outputScalarValue": {
+           "type": "function",
+           "value": "{premium_gap}"
+          }
+         },
+         {
+          "column": "out_detail",
+          "outputScalarValue": {
+           "type": "common",
+           "value": "premium_mismatch"
+          }
+         }
+        ]
+       },
+       {
+        "name": "payroll withholds a fixed federal amount",
+        "active": true,
+        "cells": [
+         {
+          "column": "in_fixed_fed",
+          "scalarCondition": {
+           "operator": "=",
+           "value": "Y"
+          }
+         },
+         {
+          "column": "out_label",
+          "outputScalarValue": {
+           "type": "common",
+           "value": "Payroll withholds a fixed federal amount"
+          }
+         },
+         {
+          "column": "out_amount",
+          "outputScalarValue": {
+           "type": "function",
+           "value": "{fed_before_m}"
+          }
+         },
+         {
+          "column": "out_detail",
+          "outputScalarValue": {
+           "type": "common",
+           "value": "fixed_fed"
+          }
+         }
+        ]
+       },
+       {
+        "name": "no federal tax left to save",
+        "active": true,
+        "cells": [
+         {
+          "column": "in_fed_zero",
+          "scalarCondition": {
+           "operator": "=",
+           "value": "Y"
+          }
+         },
+         {
+          "column": "out_label",
+          "outputScalarValue": {
+           "type": "common",
+           "value": "No federal tax left to save"
+          }
+         },
+         {
+          "column": "out_amount",
+          "outputScalarValue": {
+           "type": "function",
+           "value": "{fed_before_m}"
+          }
+         },
+         {
+          "column": "out_detail",
+          "outputScalarValue": {
+           "type": "common",
+           "value": "fed_zero"
+          }
+         }
+        ]
+       },
+       {
+        "name": "the W-4 on payroll differs from the census",
+        "active": true,
+        "cells": [
+         {
+          "column": "in_w4_diff",
+          "scalarCondition": {
+           "operator": "=",
+           "value": "Y"
+          }
+         },
+         {
+          "column": "out_label",
+          "outputScalarValue": {
+           "type": "common",
+           "value": "The W-4 on payroll differs from the census"
+          }
+         },
+         {
+          "column": "out_amount",
+          "outputScalarValue": {
+           "type": "common",
+           "value": null
+          }
+         },
+         {
+          "column": "out_detail",
+          "outputScalarValue": {
+           "type": "common",
+           "value": "w4_diff"
+          }
+         }
+        ]
+       },
+       {
+        "name": "gross pay moved between the two payslips",
+        "active": true,
+        "cells": [
+         {
+          "column": "in_gross_moved_abs",
+          "scalarCondition": {
+           "operator": ">",
+           "value": 0.02
+          }
+         },
+         {
+          "column": "out_label",
+          "outputScalarValue": {
+           "type": "common",
+           "value": "Something else changed between the two payslips"
+          }
+         },
+         {
+          "column": "out_amount",
+          "outputScalarValue": {
+           "type": "function",
+           "value": "{gross_moved}"
+          }
+         },
+         {
+          "column": "out_detail",
+          "outputScalarValue": {
+           "type": "common",
+           "value": "gross_moved"
+          }
+         }
+        ]
+       },
+       {
+        "name": "the statement does not add up, fee read from the statement",
+        "active": true,
+        "cells": [
+         {
+          "column": "in_identity_broken",
+          "scalarCondition": {
+           "operator": "=",
+           "value": "Y"
+          }
+         },
+         {
+          "column": "in_identity_explained",
+          "scalarCondition": {
+           "operator": "=",
+           "value": "N"
+          }
+         },
+         {
+          "column": "in_fee_from_stmt",
+          "scalarCondition": {
+           "operator": "=",
+           "value": "Y"
+          }
+         },
+         {
+          "column": "out_label",
+          "outputScalarValue": {
+           "type": "common",
+           "value": "The statement does not add up"
+          }
+         },
+         {
+          "column": "out_amount",
+          "outputScalarValue": {
+           "type": "function",
+           "value": "{identity_gap}"
+          }
+         },
+         {
+          "column": "out_detail",
+          "outputScalarValue": {
+           "type": "common",
+           "value": "identity_fee_stmt"
+          }
+         }
+        ]
+       },
+       {
+        "name": "the statement does not add up, fee taken from the proposal",
+        "active": true,
+        "cells": [
+         {
+          "column": "in_identity_broken",
+          "scalarCondition": {
+           "operator": "=",
+           "value": "Y"
+          }
+         },
+         {
+          "column": "in_identity_explained",
+          "scalarCondition": {
+           "operator": "=",
+           "value": "N"
+          }
+         },
+         {
+          "column": "in_fee_from_stmt",
+          "scalarCondition": {
+           "operator": "=",
+           "value": "N"
+          }
+         },
+         {
+          "column": "out_label",
+          "outputScalarValue": {
+           "type": "common",
+           "value": "The statement does not add up"
+          }
+         },
+         {
+          "column": "out_amount",
+          "outputScalarValue": {
+           "type": "function",
+           "value": "{identity_gap}"
+          }
+         },
+         {
+          "column": "out_detail",
+          "outputScalarValue": {
+           "type": "common",
+           "value": "identity_fee_prop"
+          }
+         }
+        ]
+       },
+       {
+        "name": "different federal tax tables",
+        "active": true,
+        "cells": [
+         {
+          "column": "in_fed_in_doubt",
+          "scalarCondition": {
+           "operator": "=",
+           "value": "N"
+          }
+         },
+         {
+          "column": "in_federal_gap_abs",
+          "scalarCondition": {
+           "operator": ">",
+           "value": 0.02
+          }
+         },
+         {
+          "column": "out_label",
+          "outputScalarValue": {
+           "type": "common",
+           "value": "Payroll and the proposal use different tax tables"
+          }
+         },
+         {
+          "column": "out_amount",
+          "outputScalarValue": {
+           "type": "function",
+           "value": "{federal_gap}"
+          }
+         },
+         {
+          "column": "out_detail",
+          "outputScalarValue": {
+           "type": "common",
+           "value": "tables"
+          }
+         }
+        ]
+       },
+       {
+        "name": "state withholding, Missouri whole-dollar rounding",
+        "active": true,
+        "cells": [
+         {
+          "column": "in_state_gap_abs",
+          "scalarCondition": {
+           "operator": ">",
+           "value": 0.02
+          }
+         },
+         {
+          "column": "in_state_is_mo",
+          "scalarCondition": {
+           "operator": "=",
+           "value": "Y"
+          }
+         },
+         {
+          "column": "out_label",
+          "outputScalarValue": {
+           "type": "common",
+           "value": "State withholding"
+          }
+         },
+         {
+          "column": "out_amount",
+          "outputScalarValue": {
+           "type": "function",
+           "value": "{state_gap}"
+          }
+         },
+         {
+          "column": "out_detail",
+          "outputScalarValue": {
+           "type": "common",
+           "value": "state_mo"
+          }
+         }
+        ]
+       },
+       {
+        "name": "state withholding",
+        "active": true,
+        "cells": [
+         {
+          "column": "in_state_gap_abs",
+          "scalarCondition": {
+           "operator": ">",
+           "value": 0.02
+          }
+         },
+         {
+          "column": "in_state_is_mo",
+          "scalarCondition": {
+           "operator": "=",
+           "value": "N"
+          }
+         },
+         {
+          "column": "out_label",
+          "outputScalarValue": {
+           "type": "common",
+           "value": "State withholding"
+          }
+         },
+         {
+          "column": "out_amount",
+          "outputScalarValue": {
+           "type": "function",
+           "value": "{state_gap}"
+          }
+         },
+         {
+          "column": "out_detail",
+          "outputScalarValue": {
+           "type": "common",
+           "value": "state_generic"
+          }
+         }
+        ]
+       },
+       {
+        "name": "Social Security and Medicare differ, settings consistent",
+        "active": true,
+        "cells": [
+         {
+          "column": "in_fica_gap_abs",
+          "scalarCondition": {
+           "operator": ">",
+           "value": 0.02
+          }
+         },
+         {
+          "column": "in_ss_mismatch",
+          "scalarCondition": {
+           "operator": "=",
+           "value": "N"
+          }
+         },
+         {
+          "column": "out_label",
+          "outputScalarValue": {
+           "type": "common",
+           "value": "Social Security and Medicare"
+          }
+         },
+         {
+          "column": "out_amount",
+          "outputScalarValue": {
+           "type": "function",
+           "value": "{fica_gap}"
+          }
+         },
+         {
+          "column": "out_detail",
+          "outputScalarValue": {
+           "type": "common",
+           "value": "fica"
+          }
+         }
+        ]
+       }
+      ]
+     }
+    }
+   ],
+   "details": {
+    "ret_named_exact": "The payslip takes {ret_missing} a month off this employee's pay before federal tax is worked out, and the census does not show it. The proposal therefore calculated tax on more income than payroll actually taxes. The payslip shows it as a retirement deduction of {ret_named} a month. This is about federal tax only: Social Security and Medicare are unaffected, as the payslip itself shows.",
+    "ret_named_plus": "The payslip takes {ret_missing} a month off this employee's pay before federal tax is worked out, and the census does not show it. The proposal therefore calculated tax on more income than payroll actually taxes. The payslip shows {ret_named} of it as a retirement deduction. The other {ret_unnamed} a month is another deduction taken before federal tax, which the payslip does not name. Both are missing from the census. This is about federal tax only: Social Security and Medicare are unaffected, as the payslip itself shows.",
+    "ret_unnamed": "The payslip takes this amount off the pay each month before federal tax is worked out, and the census does not show it, so the proposal calculated tax on more income than payroll taxes. The payslip does not say what the deduction is for, so it is reported as it stands rather than guessed at.",
+    "pretax_missing": "The income the proposal started from is higher than the income on the payslip by this amount, which means a deduction taken before tax on the payslip is not in the census.",
+    "wrong_column": "The proposal starts from {ti_gap_abs} a month less income than the payslip shows, and the census carries a pre-tax amount of at least that size in the Other pre-tax column. That column reduces the income Social Security and Medicare are worked on, but payroll leaves a retirement deduction inside those wages. A retirement amount belongs in the 401-k/IRA census column, where it reduces federal tax only.",
+    "ti_neg": "The income the proposal started from is lower than the income on the payslip by this amount. A deduction is in the census that payroll does not actually take before tax, or a census figure is too low.",
+    "ss_on": "The proposal credits {eng_ss} a month of Social Security savings, but neither payslip shows a Social Security deduction at all: this payroll does not pay into Social Security, as school district TRS members commonly do not. A saving on a tax nobody pays inflates the promised allotment by {eng_ss} a month. Social Security should be switched off for this employee, in the census SocialSec column or in the proposal settings.",
+    "ss_off": "The payslips deduct Social Security, but the proposal claims no Social Security saving for this employee. The premium reduces Social Security wages, so payroll actually saves {pay_ss_sav} a month that the proposal leaves out of the promise.",
+    "fee_mismatch": "The proposal worked the allotment out with an employee fee of {fee_eng} a month, but payroll actually deducts {fee_pay}. Every dollar of difference lands straight in the allotment: the promise and the payslip cannot agree until the two fees are the same. Check the program settings fee against the client's contracted fee.",
+    "salary_zero": "The proposal's taxable income for this employee is zero while the census carries real pay. The proposal calculated on no income, promised on no income, and nothing it says about this employee can be right. This is the buffer or salary field going to zero on the way into the calculation, not a payroll fault.",
+    "premium_mismatch": "The pre-tax premium on the payslip is not the premium the proposal used, so every saving the proposal worked out sits on a different base. The amount shown is the monthly difference between the two premiums.",
+    "fixed_fed": "Payroll takes the same federal tax before and after the premium, so this employee gets no federal tax saving from it at all. The amount shown is the federal tax being withheld each month regardless.",
+    "fed_zero": "Federal tax falls to nothing once the premium is deducted. The employee gets back all the federal tax there was, and no more, so the saving cannot reach the amount the proposal promised.",
+    "w4_diff": "Payroll and the census hold different W-4 details: {w4_text}. Tax worked out from different W-4 details will not agree.",
+    "gross_moved": "Gross pay is not the same on the two payslips, so something changed besides the premium and the two are not comparable. Ask for a mock payslip that changes only the premium. This check looks at gross pay only, so other changes may still be present.",
+    "identity_fee_stmt": "The figures on the two payslips do not add up: the tax saved, less the employee fee, does not come to the change in take home pay. This tool will not guess which line is wrong, so this employee is marked as not verified. Someone should look at the two payslips.",
+    "identity_fee_prop": "The figures on the two payslips do not add up: the tax saved, less the employee fee, does not come to the change in take home pay, and the employee fee was taken from the proposal because the statement prints no after-tax fee line. This tool will not guess which line is wrong, so this employee is marked as not verified. Someone should look at the two payslips.",
+    "tables": "Payroll and the proposal use different federal tax tables, so they work out slightly different tax on the same pay, and the saving lands in a different place. This is a settings difference between two systems, not a mistake in either calculation, and nothing here says which set of tables is the right one.",
+    "state_mo": "Missouri rounds state tax to whole dollars on each payslip while the proposal works to the cent, so a small difference every pay period is expected.",
+    "state_generic": "State tax on the payslip differs from what the proposal worked out by this amount.",
+    "fica": "Social Security and Medicare on the payslips differ from the proposal by this amount. Before treating it as a fault, check whether this employee pays into Social Security at all, and allow for payroll rounding each pay period."
+   }
+  }
+ }
+}
