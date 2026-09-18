@@ -189,8 +189,25 @@ def audit_employee(emp: EmployeeAudit) -> EmployeeAudit:
     # One ordered repair at the top of the block: the census corrections this employee needs, in one line.
     if emp.allotment_gap is not None and emp.allotment_gap < -CENT:
         ev = _evidence(emp)
-        if ev.get('upstream_cause') == 'Y':
-            emp.primary_action = ev.get('rerun_fix') or ''
+        census_labels = {'Retirement deduction missing from the census',
+                         'A pre-tax deduction is missing from the census',
+                         'A deduction sits in the wrong census column',
+                         'The proposal starts from less income than the payslip shows',
+                         'The census does not have Social Security set to N',
+                         'The census has Social Security set to N but payroll deducts it',
+                         'The census does not have Medicare set to N',
+                         'The proposal counts Social Security savings this payroll never pays',
+                         'The payroll pays Social Security the proposal ignores',
+                         'The employee fee in the proposal is not the fee payroll deducts',
+                         'The premium on the payslip is not the premium in the proposal',
+                         'The proposal calculated on no income at all'}
+        open_labels = {f.label for f in emp.findings}
+        acts = []
+        if open_labels & census_labels:
+            acts.append(ev.get('rerun_fix') or '')
+        if ev.get('payroll_action'):
+            acts.append(ev['payroll_action'])
+        emp.primary_action = ' '.join(a for a in acts if a)
     emp.uncertainty = _uncertainty(emp)
     # Where a payslip does not add up and the census plus the statement's own arithmetic say decisively what one
     # misread line must have been, the audit uses the corrected figure and reports the correction, instead of
@@ -245,7 +262,60 @@ def audit_employee(emp: EmployeeAudit) -> EmployeeAudit:
     emp.verdict, emp.verdict_class = _verdict(emp)
     if len(emp.findings) > 1:
         emp.findings = [f for f in emp.findings if f.label != 'Match']
+    # Dependency order, not dollar order: a reader must fix the thing whose correction changes the others.
+    # Evidence validity, then the inputs that set the taxable base, then programme settings, then how payroll
+    # executed the premium, then what is left unexplained, then a limit on the promise.
+    emp.findings.sort(key=lambda f: _ORDER.get(f.label, 45))
     return emp
+
+
+_ORDER = {
+    # 1. can the payslips be believed at all
+    'The statement shows two different net pay figures': 10,
+    'The deductions add up to more than the pay': 10,
+    'The statement does not add up': 11,
+    'A misread figure was corrected from the census and the statement arithmetic': 12,
+    'The statement and the proposal disagree': 13,
+    'Something else changed between the two payslips': 14,
+    # 2. the inputs that set the taxable base
+    'No census row matches this employee': 20,
+    'The proposal calculated on no income at all': 21,
+    'Retirement deduction missing from the census': 22,
+    'A pre-tax deduction is missing from the census': 23,
+    'A deduction sits in the wrong census column': 24,
+    'The proposal starts from less income than the payslip shows': 25,
+    'The W-4 on payroll differs from the census': 26,
+    # 3. programme settings
+    'The census does not have Social Security set to N': 30,
+    'The census has Social Security set to N but payroll deducts it': 30,
+    'The proposal counts Social Security savings this payroll never pays': 31,
+    'The payroll pays Social Security the proposal ignores': 31,
+    'The census does not have Medicare set to N': 32,
+    'The proposal counts Medicare savings this payroll never pays': 32,
+    'The payroll pays Medicare the proposal ignores': 32,
+    'The employee fee in the proposal is not the fee payroll deducts': 33,
+    'The premium on the payslip is not the premium in the proposal': 34,
+    'The proposal report does not add up internally': 35,
+    # 4. how payroll executed the premium
+    'The premium was not taken pre-tax in full': 40,
+    'Taxable wages fell by more than the premium': 40,
+    'The premium did not come out of Medicare wages in full': 41,
+    'Medicare wages fell by more than the premium': 41,
+    'The premium is deducted but never reimbursed': 42,
+    'The reimbursement does not return the whole premium': 43,
+    'The reimbursement returns more than the premium': 43,
+    'The retirement deduction changed with the premium': 44,
+    'Payroll withholds a fixed federal amount': 45,
+    # 5. what is left unexplained
+    "The proposal's federal saving does not match payroll": 50,
+    'State withholding does not match the proposal': 51,
+    'Social Security and Medicare withheld do not match the proposal': 52,
+    # 6. a limit on what can be promised
+    'The promised federal saving is more than the federal tax available': 60,
+    'No cause could be established': 90,
+    'No payslip found for this employee': 91,
+    'Match': 99,
+}
 
 
 def _cross_document(emp):
@@ -428,15 +498,45 @@ def _evidence(emp: EmployeeAudit) -> dict:
         rerun_fix = 'Correct the census for this employee (' + ', '.join(fixes) + ') and rerun the proposal.'
     else:
         rerun_fix = 'Check this employee\'s census row against the payslip and rerun the proposal.'
-    # A residual is only a finding once nothing upstream explains it. Where a census field or a programme
-    # setting is already known to be wrong, the federal and FICA differences it causes are that same defect
-    # counted again, and a reader must not be shown one problem as three.
-    upstream = bool(
-        fixes
-        or (ti_gap is not None and ti_gap > CENT)
-        or (e.taxable_income_before is not None and abs(e.taxable_income_before) <= CENT
-            and (c.gross_annual or 0) > 0)
-        or not getattr(c, 'found', True))
+    # A residual is suppressed only to the extent the known defects explain it. A census defect may absorb the
+    # difference it can account for and no more: an independent defect on the same employee must still be
+    # reported. The bound is the most that defect could move the figure, never an assumption that it did.
+    TOP_FED, SS_RATE, MED_RATE, TOP_STATE = 0.37, 0.062, 0.0145, 0.10
+    pretax_missing_total = max(ret_missing or 0, 0) + max(ti_gap or 0, 0)
+    wrong_col_amount = abs(ti_gap) if (ti_gap is not None and ti_gap < -1.0
+                                       and (c.pretax_other or 0) >= abs(ti_gap) - CENT) else 0.0
+    explained_fed = TOP_FED * (pretax_missing_total + wrong_col_amount)
+    # a Social Security or Medicare setting that disagrees with the payslips moves the FICA comparison by the
+    # whole tax on the premium; a pre-tax amount in the wrong census column moves it by both rates
+    ss_setting_open = slips_present and ((not ss_on_slips and ((eng_ss or 0) > CENT or (c.socialsec or '') != 'N'))
+                                         or (ss_on_slips and (c.socialsec or '') == 'N'))
+    med_setting_open = slips_present and med_read and not med_on_slips and (
+        (eng_med or 0) > CENT or (c.medicare or '') != 'N')
+    explained_fica = ((SS_RATE * (slip_prem or 0) if ss_setting_open else 0.0)
+                      + (MED_RATE * (slip_prem or 0) if med_setting_open else 0.0)
+                      + (SS_RATE + MED_RATE) * wrong_col_amount)
+    explained_state = TOP_STATE * (pretax_missing_total + wrong_col_amount)
+    resid = lambda gap, explained: (0.0 if gap is None else max(0.0, abs(gap) - explained - 0.01))
+    fed_residual_abs = resid(emp.federal_gap, explained_fed)
+    fica_residual_abs = resid(emp.fica_gap, explained_fica)
+    state_residual_abs = resid(emp.state_gap, explained_state)
+    sgn = lambda gap, amt: (0.0 if gap is None else (-amt if gap < 0 else amt))
+    # a ceiling is only a finding when the promise actually exceeds it
+    fed_before_m = per_month(b.federal, pp)
+    promise_over_ceiling = (a.federal == 0 and b.federal not in (None, 0)
+                            and e.federal_savings is not None and fed_before_m is not None
+                            and e.federal_savings > fed_before_m + 1.0)
+    # what payroll must do, where no census change can fix it
+    pay_acts = []
+    if pretax_known and (premium_pretax_gap or 0) > 1.0:
+        pay_acts.append('take the whole premium pre-tax')
+    if medg_known and (medg_gap or 0) > 1.0:
+        pay_acts.append('take the whole premium out of Medicare wages')
+    if reimb_missing_sig:
+        pay_acts.append('add the reimbursement line')
+    elif reimb_m is not None and slip_prem is not None and abs(reimb_gap or 0) > 1.0:
+        pay_acts.append(f'set the reimbursement to {_m(slip_prem)}')
+    payroll_action = ('Payroll must ' + ', and '.join(pay_acts) + '.') if pay_acts else ''
     gross_moved = (per_month(a.gross - b.gross, pp)
                    if b.gross is not None and a.gross is not None else None)
     identity_broken = emp.identity_gap is not None and abs(emp.identity_gap) > 2.0
@@ -462,6 +562,7 @@ def _evidence(emp: EmployeeAudit) -> dict:
         ret_missing=ret_missing, ret_missing_abs=abs(ret_missing or 0),
         ret_named=ret_named, ret_unnamed=ret_unnamed, ret_unnamed_abs=abs(ret_unnamed or 0),
         ret_named_known=yn(ret_named_known), ret_zero=yn((ret_missing or 0) == 0),
+        ret_unnamed_signed=ret_unnamed,
         ti_gap=ti_gap, ti_gap_abs=abs(ti_gap) if ti_gap is not None else None,
         wrong_col_match=yn(ti_gap is not None and (c.pretax_other or 0) >= abs(ti_gap) - 0.02),
         slips_present=yn(slips_present), ss_on_slips=yn(ss_on_slips),
@@ -507,7 +608,27 @@ def _evidence(emp: EmployeeAudit) -> dict:
         census_found=yn(getattr(c, 'found', True)),
         census_ss=(c.socialsec or ''), census_med=(c.medicare or ''),
         eng_fed_sav=e.federal_savings, pay_fed_sav=emp.payroll_federal_savings,
-        rerun_fix=rerun_fix, upstream_cause=yn(upstream),
+        rerun_fix=rerun_fix,
+        # residuals, net of what the known defects can account for
+        fed_residual_abs=fed_residual_abs, fed_residual=sgn(emp.federal_gap, fed_residual_abs),
+        fica_residual_abs=fica_residual_abs, fica_residual=sgn(emp.fica_gap, fica_residual_abs),
+        state_residual_abs=state_residual_abs, state_residual=sgn(emp.state_gap, state_residual_abs),
+        promise_over_ceiling=yn(promise_over_ceiling),
+        # the pre-tax and Medicare-wage checks are two-sided: too little taken out, or too much
+        premium_stayed_taxable=(premium_pretax_gap if (premium_pretax_gap or 0) > 0 else None),
+        premium_stayed_taxable_abs=(premium_pretax_gap if (premium_pretax_gap or 0) > 0 else 0.0),
+        taxable_fell_extra_abs=(abs(premium_pretax_gap) if (premium_pretax_gap or 0) < 0 else 0.0),
+        taxable_fell_extra=(abs(premium_pretax_gap) if (premium_pretax_gap or 0) < 0 else None),
+        premium_stayed_medicare_abs=(medg_gap if (medg_gap or 0) > 0 else 0.0),
+        premium_stayed_medicare=(medg_gap if (medg_gap or 0) > 0 else None),
+        medicare_fell_extra_abs=(abs(medg_gap) if (medg_gap or 0) < 0 else 0.0),
+        medicare_fell_extra=(abs(medg_gap) if (medg_gap or 0) < 0 else None),
+        reimb_short_abs=(abs(reimb_gap) if (reimb_gap or 0) < 0 else 0.0),
+        reimb_short=(abs(reimb_gap) if (reimb_gap or 0) < 0 else None),
+        reimb_over_abs=(reimb_gap if (reimb_gap or 0) > 0 else 0.0),
+        reimb_over=(reimb_gap if (reimb_gap or 0) > 0 else None),
+        ret_change_size=abs(ret_change) if ret_change is not None else None,
+        payroll_action=payroll_action,
     )
 
 

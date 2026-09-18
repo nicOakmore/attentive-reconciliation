@@ -200,3 +200,68 @@ if FAIL:
         print('  ' + f)
     sys.exit(1)
 print('per-field rule tests PASS (7)')
+
+# ---- round three: attribution, not blanket suppression ------------------------------
+# A census defect absorbs only what it can explain. An independent federal defect on the
+# same employee must still be reported.
+e = base2()
+e.census.retirement_401k = 0            # upstream defect worth at most 37% of $549.56 = $203
+e.engine.federal_savings = 900.00       # a difference far beyond what that can explain
+e.engine.allotment = 200.0
+ls = L2(e)
+check('independent federal defect survives attribution',
+      "The proposal's federal saving does not match payroll" in ls, str(ls))
+
+# The same defect alone, with a difference inside what it explains, stays suppressed.
+e = base2()
+e.census.retirement_401k = 0
+e.engine.federal_savings = 200.00       # within 37% of the missing $549.56
+e.engine.allotment = 90.0
+ls = L2(e)
+check('explained federal difference stays suppressed',
+      "The proposal's federal saving does not match payroll" not in ls, str(ls))
+
+# A ceiling is only a finding when the promise exceeds it.
+e = base2()
+e.before.federal, e.after.federal = 55.23, 0.0
+e.engine.federal_savings = 170.77       # promise far above the $55.23 available
+e.after.net_pay = 4400.00
+ls = L2(e)
+check('ceiling fires when the promise exceeds it',
+      'The promised federal saving is more than the federal tax available' in ls, str(ls))
+
+e = base2()
+e.before.federal, e.after.federal = 55.23, 0.0
+e.engine.federal_savings = 55.23        # promise equals what was available
+e.engine.allotment = 20.0
+e.after.net_pay = 4500.00
+ls = L2(e)
+check('ceiling silent when the promise fits',
+      'The promised federal saving is more than the federal tax available' not in ls, str(ls))
+
+# Taxable wages falling by more than the premium is its own finding, with a positive amount.
+e = base2()
+e.after.taxable_wages = 4000.00         # fell more than the $1,173 premium
+a = audit_employee(e)
+lab = [f.label for f in a.findings]
+check('two-sided pre-tax check', 'Taxable wages fell by more than the premium' in lab, str(lab))
+amt = [f.amount for f in a.findings if f.label == 'Taxable wages fell by more than the premium']
+check('and its amount is positive', amt and amt[0] > 0, str(amt))
+
+# Dependency order: evidence validity first, inputs next, residuals last.
+e = base2()
+e.census.retirement_401k = 0
+e.before.gross = 7000.00                # gross moved: an evidence-validity finding
+a = audit_employee(e)
+order = [f.label for f in a.findings]
+if 'Something else changed between the two payslips' in order and 'Retirement deduction missing from the census' in order:
+    check('evidence validity is listed before census inputs',
+          order.index('Something else changed between the two payslips')
+          < order.index('Retirement deduction missing from the census'), str(order))
+
+if FAIL:
+    print(f'round-three FAIL ({len(FAIL)})')
+    for f in FAIL:
+        print('  ' + f)
+    sys.exit(1)
+print('round-three tests PASS (7)')
