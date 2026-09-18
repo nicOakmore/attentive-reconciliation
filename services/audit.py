@@ -133,6 +133,7 @@ class EmployeeAudit:
     narrative: str = ''
     fee_from_statement: bool = False
     ss_note: str = ''
+    primary_action: str = ''
 
     def as_dict(self):
         d = asdict(self)
@@ -185,6 +186,11 @@ def audit_employee(emp: EmployeeAudit) -> EmployeeAudit:
         emp.ti_before_gap = r2(e.taxable_income_before - per_month(b.medicare_gross, pp))
 
     emp.findings = _attribute(emp)
+    # One ordered repair at the top of the block: the census corrections this employee needs, in one line.
+    if emp.allotment_gap is not None and emp.allotment_gap < -CENT:
+        ev = _evidence(emp)
+        if ev.get('upstream_cause') == 'Y':
+            emp.primary_action = ev.get('rerun_fix') or ''
     emp.uncertainty = _uncertainty(emp)
     # Where a payslip does not add up and the census plus the statement's own arithmetic say decisively what one
     # misread line must have been, the audit uses the corrected figure and reports the correction, instead of
@@ -422,6 +428,15 @@ def _evidence(emp: EmployeeAudit) -> dict:
         rerun_fix = 'Correct the census for this employee (' + ', '.join(fixes) + ') and rerun the proposal.'
     else:
         rerun_fix = 'Check this employee\'s census row against the payslip and rerun the proposal.'
+    # A residual is only a finding once nothing upstream explains it. Where a census field or a programme
+    # setting is already known to be wrong, the federal and FICA differences it causes are that same defect
+    # counted again, and a reader must not be shown one problem as three.
+    upstream = bool(
+        fixes
+        or (ti_gap is not None and ti_gap > CENT)
+        or (e.taxable_income_before is not None and abs(e.taxable_income_before) <= CENT
+            and (c.gross_annual or 0) > 0)
+        or not getattr(c, 'found', True))
     gross_moved = (per_month(a.gross - b.gross, pp)
                    if b.gross is not None and a.gross is not None else None)
     identity_broken = emp.identity_gap is not None and abs(emp.identity_gap) > 2.0
@@ -492,7 +507,7 @@ def _evidence(emp: EmployeeAudit) -> dict:
         census_found=yn(getattr(c, 'found', True)),
         census_ss=(c.socialsec or ''), census_med=(c.medicare or ''),
         eng_fed_sav=e.federal_savings, pay_fed_sav=emp.payroll_federal_savings,
-        rerun_fix=rerun_fix,
+        rerun_fix=rerun_fix, upstream_cause=yn(upstream),
     )
 
 

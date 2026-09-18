@@ -173,6 +173,9 @@ def employee_block(doc, a, client=''):
                         f"the payslip taxes "
                         f"{money(round((a.before.taxable_wages or 0) * a.pay_periods / 12, 2))}, a difference of "
                         f"{money(gap)}.")
+    if getattr(a, 'primary_action', ''):
+        _keep(_p(doc, 'What to change', size=9.5, bold=True, color=NAVY, space_after=2))
+        _p(doc, a.primary_action, bold=True, space_after=6)
     _keep(_p(doc, 'Why', size=9.5, bold=True, color=NAVY, space_after=2))
     named = [f for f in a.findings if f.label not in ('Match', 'No cause could be established', 'No payslip found for this employee')]
     if a.verdict_class == 'green':

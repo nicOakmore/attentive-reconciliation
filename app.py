@@ -150,6 +150,7 @@ def _row(a):
                 findings=[dict(label=f.label, amount=f.amount, detail=f.detail) for f in a.findings],
                 before=d['before'], after=d['after'], engine=d['engine'], census=d['census'],
                 pay_periods=a.pay_periods, expected_net_change=a.expected_net_change, identity_gap=a.identity_gap,
+                primary_action=getattr(a, 'primary_action', ''),
                 uncertainty=None if a.verdict_class == 'green' else getattr(a, 'uncertainty', None),
                 page_keys=[k for k in (getattr(a.before, 'source', ''), getattr(a.after, 'source', '')) if k])
 

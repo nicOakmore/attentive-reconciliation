@@ -24,18 +24,26 @@ BANNED = ('tax table', 'out of date', 'outdated', 'predates', 'current engine', 
 
 def _facts(summary, audits, client, period):
     """Everything the model is allowed to know, as numbers."""
-    causes = [dict(cause=k, employees=v['employees'], monthly_amount=round(v['amount'], 2))
+    n = max(summary['employees'], 1)
+    pct = lambda v: round(100.0 * v / n)
+    causes = [dict(cause=k, employees=v['employees'], monthly_amount=round(v['amount'], 2),
+                   share_percent=pct(v['employees']))
               for k, v in (summary.get('causes') or [])]
     worst = sorted([a for a in audits if a.allotment_gap is not None and a.allotment_gap < 0],
                    key=lambda a: a.allotment_gap)[:5]
+    gap = summary['total_gap'] or 0
     return dict(
         client=client or 'the client', period=period or '',
         employees=summary['employees'],
         taking_home_at_least_promised=summary['matched'],
+        taking_home_at_least_promised_percent=pct(summary['matched']),
         short_of_promise_with_a_named_cause=summary['attributed'],
+        short_of_promise_with_a_named_cause_percent=pct(summary['attributed']),
         short_of_promise_cause_not_established=summary['unexplained'],
+        short_of_promise_cause_not_established_percent=pct(summary['unexplained']),
         not_comparable_files_missing=summary['data_missing'],
-        total_monthly_shortfall=summary['total_gap'],
+        total_monthly_shortfall=round(gap, 2),
+        total_annual_shortfall=round(gap * 12, 2),
         employees_whose_take_home_falls=summary['decreases'],
         causes_by_size=causes,
         five_largest_shortfalls=[dict(employee=a.name, monthly_gap=a.allotment_gap,

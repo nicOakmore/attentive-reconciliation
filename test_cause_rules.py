@@ -16,7 +16,7 @@ def base():
     return EmployeeAudit(
         name='CASE', pay_periods=12,
         census=Census(gross_annual=79935.83, pay_periods=12, pretax_other=270, retirement_401k=549.58,
-                      filing_status='S', state='TX'),
+                      filing_status='S', state='TX', socialsec='N', medicare='Y'),
         engine=Engine(federal_before=549.35, federal_savings=170.77, state_savings=0, ss_savings=0,
                       medicare_savings=17.01, gross_savings=187.78, fee=114, allotment=73.78,
                       taxable_income_before=6391.32, taxable_income_after=5218.32, premium=1173),
@@ -125,10 +125,28 @@ check('w4 still fires', 'The W-4 on payroll differs from the census' in ls, str(
 
 # 11. federal figures do not match: the report is out of date
 e = base()
-e.after.federal = 389.00               # payroll saves 160.35 where the engine's table says 170.77
+e.after.federal = 389.00               # payroll saves 160.35 where the report promises 170.77
 e.after.net_pay = 4563.36
 ls = labels(e)
 check('federal mismatch fires', "The proposal's federal saving does not match payroll" in ls, str(ls))
+
+# 11b. the residual is suppressed while an upstream census cause is open
+e = base()
+e.census.retirement_401k = 0           # retirement missing: an upstream, actionable cause
+e.census.socialsec = ''                # and the SocialSec setting is open too
+e.after.federal = 389.00
+e.after.net_pay = 4563.36
+ls = labels(e)
+check('upstream causes present', 'Retirement deduction missing from the census' in ls, str(ls))
+check('residual suppressed while upstream open',
+      "The proposal's federal saving does not match payroll" not in ls, str(ls))
+
+# 11c. the SocialSec rule fires when the census does not carry N
+e = base()
+e.census.socialsec = ''
+e.engine.allotment = 90.0
+ls = labels(e)
+check('SocialSec N rule fires', 'The census does not have Social Security set to N' in ls, str(ls))
 
 # 12. no payslip at all
 e = base()
@@ -147,7 +165,7 @@ print(f'cause-rules unit tests PASS')
 def base2():
     return EmployeeAudit(name='CASE', pay_periods=12,
         census=Census(gross_annual=79935.83, pay_periods=12, pretax_other=270, retirement_401k=549.58,
-                      filing_status='S', state='TX'),
+                      filing_status='S', state='TX', socialsec='N', medicare='Y'),
         engine=Engine(federal_savings=170.77, state_savings=0, ss_savings=0, medicare_savings=17.01,
                       gross_savings=187.78, fee=114, allotment=73.78, taxable_income_before=6391.32, premium=1173),
         before=Paycheck(gross=6661.31, federal=549.35, state=0, medicare=92.67, taxable_wages=5841.75,

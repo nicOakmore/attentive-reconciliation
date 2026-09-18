@@ -292,6 +292,7 @@ function detail(e) {
        tr('Federal savings', en.federal_savings, e.payroll_federal_savings) +
        tr('Taxable income before', en.taxable_income_before, b.medicare_gross === null || b.medicare_gross === undefined ? null : Math.round(b.medicare_gross * pp / 12 * 100) / 100) +
        '</table></div>';
+  if (e.primary_action) h += '<div class="detail-section"><h4>What to change</h4><div class="diag yellow"><b>' + e.primary_action + '</b></div></div>';
   h += '<div class="detail-section"><h4>Cause</h4>';
   (e.findings || []).forEach(f => h += '<div class="diag ' + (f.label === 'Match' ? 'green' : (f.label === 'Unattributed' ? 'red' : 'yellow')) + '"><b>' + f.label + (f.amount !== null && f.amount !== undefined ? ': ' + money(f.amount) : '') + '.</b> ' + f.detail + '</div>');
   h += '</div>';
