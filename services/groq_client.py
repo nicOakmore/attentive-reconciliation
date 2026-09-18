@@ -107,14 +107,23 @@ def _tighten(text, limit=5000):
     return out[:limit] if out else (text or '')[:limit]
 
 
+def _text(prompt, max_tokens=1200, temperature=0.1):
+    """A prose call. The reasoning models on this endpoint spend the token budget thinking and then return
+    an empty message, so the budget is generous and the thinking is kept short."""
+    payload = dict(model=TEXT_MODEL, temperature=temperature, max_tokens=max_tokens,
+                   messages=[{'role': 'user', 'content': prompt}])
+    if 'gpt-oss' in TEXT_MODEL:
+        payload['reasoning_effort'] = 'low'
+    return (_post(payload) or '').strip()
+
+
 def summary_paragraph(facts):
     """One short paragraph for the front summary. The model receives computed numbers and may not add any."""
     prompt = ('Write one paragraph of at most 90 words for the front page of a payroll reconciliation report. '
               'Use only the numbers supplied. State the result first. Plain declarative sentences, no dashes, no '
               'hedging, no adjectives, no invented causes. Do not add any number that is not in the input.\n\n'
               + json.dumps(facts, default=str))
-    return _post(dict(model=TEXT_MODEL, temperature=0.1, max_tokens=300,
-                      messages=[{'role': 'user', 'content': prompt}])).strip()
+    return _text(prompt, max_tokens=900)
 
 
 def health():

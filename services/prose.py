@@ -80,8 +80,7 @@ def audit_paragraphs(summary, audits, client='', period='', paragraphs=3):
         "employee who is not listed. Write at most 130 words in total.\n\n"
         + json.dumps(facts, default=str))
     try:
-        text = G._post(dict(model=G.TEXT_MODEL, temperature=0.1, max_tokens=500,
-                            messages=[{'role': 'user', 'content': prompt}])).strip()
+        text = G._text(prompt, max_tokens=1400)
     except Exception as exc:
         LAST_REASON = f'model call failed: {type(exc).__name__}: {str(exc)[:120]}'
         return ''
