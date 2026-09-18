@@ -56,8 +56,14 @@ def _numbers(text):
     return set(re.findall(r'\d+(?:\.\d+)?', (text or '').replace(',', '')))
 
 
+LAST_REASON = ''
+
+
 def audit_paragraphs(summary, audits, client='', period='', paragraphs=3):
-    """The document's opening. Returns '' rather than anything unverified."""
+    """The document's opening. Returns '' rather than anything unverified, and records why."""
+    global LAST_REASON
+    LAST_REASON = ''
+
     from . import groq_client as G
     facts = _facts(summary, audits, client, period)
     prompt = (
@@ -76,12 +82,21 @@ def audit_paragraphs(summary, audits, client='', period='', paragraphs=3):
     try:
         text = G._post(dict(model=G.TEXT_MODEL, temperature=0.1, max_tokens=500,
                             messages=[{'role': 'user', 'content': prompt}])).strip()
-    except Exception:
+    except Exception as exc:
+        LAST_REASON = f'model call failed: {type(exc).__name__}: {str(exc)[:120]}'
+        return ''
+    if not text:
+        LAST_REASON = 'model returned nothing'
         return ''
     low = text.lower()
-    if any(b in low for b in BANNED):
+    hit = [b for b in BANNED if b in low]
+    if hit:
+        LAST_REASON = f'rejected, banned wording: {hit[0]}'
         return ''
     # Every number in the prose must have come from the fact sheet: the model may not invent one.
-    if not _numbers(text) <= _numbers(json.dumps(facts, default=str)):
+    extra = sorted(_numbers(text) - _numbers(json.dumps(facts, default=str)))
+    if extra:
+        LAST_REASON = f'rejected, numbers not in the fact sheet: {", ".join(extra[:6])}'
         return ''
+    LAST_REASON = 'accepted'
     return text

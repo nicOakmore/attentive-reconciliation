@@ -107,6 +107,7 @@ def _work(job, census, rep, before, after, client, period):
         try:
             from services import prose
             para = prose.audit_paragraphs(summary, audits, client=client, period=period)
+            notes.append(f'Opening paragraphs: {prose.LAST_REASON}')
             if not para:
                 para = groq_client.summary_paragraph(dict(client=client or 'the client', employees=summary['employees'],
                                                           reconciled=summary['matched'], attributed=summary['attributed'],
