@@ -291,6 +291,7 @@ function detail(e) {
        '</table></div>';
   h += '<div class="detail-section"><h4>Cause</h4>';
   (e.findings || []).forEach(f => h += '<div class="diag ' + (f.label === 'Match' ? 'green' : (f.label === 'Unattributed' ? 'red' : 'yellow')) + '"><b>' + f.label + (f.amount !== null && f.amount !== undefined ? ': ' + money(f.amount) : '') + '.</b> ' + f.detail + '</div>');
+  if (e.ss_note) h += '<div class="diag ' + (e.ss_note.indexOf('Consistent') >= 0 ? 'green' : 'yellow') + '">' + e.ss_note + '</div>';
   h += '</div>';
   if (en.allotment !== null && e.actual_net_change !== null && en.allotment !== undefined && e.actual_net_change !== undefined) {
     h += '<div class="detail-section"><h4>Allotment against actual net pay</h4><table class="detail-table">' +

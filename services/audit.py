@@ -129,6 +129,7 @@ class EmployeeAudit:
     uncertainty: Optional[dict] = None
     narrative: str = ''
     fee_from_statement: bool = False
+    ss_note: str = ''
 
     def as_dict(self):
         d = asdict(self)
@@ -230,6 +231,22 @@ def audit_employee(emp: EmployeeAudit) -> EmployeeAudit:
                     f"On the {d['statement']} payslip the {item['field'].replace('_', ' ')} line shows "
                     f"{_m(item['read'])}, but {item['source']} says it should be {_m(item['expected'])}. One of the "
                     f"two is wrong and this tool does not assume which, so both figures are shown."))
+    # One explicit line on Social Security, so its absence is never silent: a TRS payroll deducts none and a
+    # proposal must promise none; when the two disagree the cause findings already carry the amount.
+    if b.net_pay is not None or a.net_pay is not None:
+        on_slips = (b.social_security or 0) > 0.005 or (a.social_security or 0) > 0.005
+        claimed = (e.ss_savings or 0) > 0.02
+        if on_slips and claimed:
+            emp.ss_note = 'Social Security: the payslips deduct it and the proposal counts a saving on it. Consistent.'
+        elif not on_slips and not claimed:
+            emp.ss_note = ('Social Security: the payslips deduct none and the proposal promises no saving on it. '
+                           'Consistent with a TRS payroll outside Social Security.')
+        elif claimed:
+            emp.ss_note = ('Social Security: the proposal counts a saving on it but the payslips deduct none. See '
+                           'the cause above: it should be switched off for this employee.')
+        else:
+            emp.ss_note = ('Social Security: the payslips deduct it but the proposal claims no saving on it. See '
+                           'the cause above.')
     # Decided last, once every finding is in: deciding it earlier let an employee be called correct while carrying
     # a finding that says the payslip cannot be trusted.
     emp.verdict, emp.verdict_class = _verdict(emp)

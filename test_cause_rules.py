@@ -120,7 +120,7 @@ e = base()
 e.after.federal = 389.00               # payroll saves 160.35 where the engine's table says 170.77
 e.after.net_pay = 4563.36
 ls = labels(e)
-check('tables still fires', 'Payroll and the proposal use different tax tables' in ls, str(ls))
+check('tables still fires', 'The proposal report predates the current federal tax table' in ls, str(ls))
 
 # 12. no payslip at all
 e = base()

@@ -228,24 +228,11 @@ def employee_block(doc, a, client=''):
 
 
 def _social_security_line(doc, a):
-    """One explicit line per employee on Social Security, so its absence is never silent. A TRS payroll deducts
-    none and a proposal must promise none; when the two disagree the cause block above already says so."""
-    slips = a.before.net_pay is not None or a.after.net_pay is not None
-    if not slips:
-        return
-    on_slips = (a.before.social_security or 0) > 0.005 or (a.after.social_security or 0) > 0.005
-    claimed = (a.engine.ss_savings or 0) > 0.02
-    if on_slips and claimed:
-        _p(doc, 'Social Security: the payslips deduct it and the proposal counts a saving on it. Consistent.')
-    elif not on_slips and not claimed:
-        _p(doc, 'Social Security: the payslips deduct none and the proposal promises no saving on it. Consistent '
-                'with a TRS payroll outside Social Security.')
-    elif claimed:
-        _p(doc, 'Social Security: the proposal counts a saving on it but the payslips deduct none. See the cause '
-                'above: it should be switched off for this employee.')
-    else:
-        _p(doc, 'Social Security: the payslips deduct it but the proposal claims no saving on it. See the cause '
-                'above.')
+    """One explicit line per employee on Social Security, so its absence is never silent. The wording is decided
+    once, in the audit, and shown identically here and in the web panel."""
+    note = getattr(a, 'ss_note', '')
+    if note:
+        _p(doc, note)
 
 
 def _uncertainty_block(doc, a):
@@ -343,9 +330,12 @@ def _resolution(a):
     if 'Payroll withholds a fixed federal amount' in labels:
         return ('Nothing to correct on the census. Payroll withholds a fixed federal amount for this employee, so '
                 'the premium cannot produce a federal saving. The proposal should not promise one.')
-    if labels & {'Payroll and the proposal use different tax tables', 'State withholding'}:
-        return ('Nothing to correct on the census. The difference comes from the tax tables each system holds, not '
-                'from the data entered.')
+    if 'The proposal report predates the current federal tax table' in labels:
+        return ('What to do: run the proposal again on the current engine and reconcile against that report. The '
+                'difference comes from the outdated table the report was produced on, not from the data entered.')
+    if 'State withholding' in labels:
+        return ('Nothing to correct on the census. The difference comes from the state tax tables each system '
+                'holds, not from the data entered.')
     if 'No cause could be established' in labels:
         return 'The difference is recorded. The files provided do not show what caused it.'
     return 'The difference is recorded.'
