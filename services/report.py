@@ -94,7 +94,9 @@ def _paycheck_rows(a):
         if x is None and y is None:
             continue
         chg = None if (x is None or y is None) else round(y - x, 2)
-        rows.append([label + per if label == 'Gross' else label, money(x), money(y), signed(chg)])
+        cell = lambda v: money(v) if v is not None else 'not shown'
+        rows.append([label + per if label == 'Gross' else label, cell(x), cell(y),
+                     signed(chg) if chg is not None else ''])
     return rows
 
 
@@ -203,7 +205,6 @@ def employee_block(doc, a, client=''):
         _table(doc, ['Figure', 'Proposal', 'Payslips', 'Difference'], rr, [2.9, 1.2, 1.2, 1.1])
         _p(doc, '', space_after=2)
 
-    _uncertainty_block(doc, a)
     res = _resolution(a)
     _p(doc, res if res else '', bold=bool(res), space_after=14)
 

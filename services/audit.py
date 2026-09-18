@@ -211,11 +211,9 @@ def audit_employee(emp: EmployeeAudit) -> EmployeeAudit:
             for tag, fld, obs, new, src in applied:
                 emp.findings.append(Finding(
                     'A misread figure was corrected from the census and the statement arithmetic', r2(new - obs),
-                    f"On the {tag} payslip the {fld.replace('_', ' ')} line was read as {_m(obs)}, but the page "
-                    f"does not add up with that figure and does with {_m(new)}"
-                    + (f", which {src} also gives" if src else '')
-                    + f". The audit uses {_m(new)}. The correction is reported so a reader can check that line "
-                    f"on the scan."))
+                    f"On the {tag} payslip the {fld.replace('_', ' ')} line was read as {_m(obs)}; the page adds "
+                    f"up with {_m(new)}" + (f", which {src} also gives" if src else '') + '.',
+                    'Check that line on the scanned payslip.'))
             return emp
     if emp.uncertainty:
         for st in (emp.uncertainty.get('statements') or []):
@@ -223,10 +221,9 @@ def audit_employee(emp: EmployeeAudit) -> EmployeeAudit:
                 if 'exceed gross less net pay' in nm:
                     emp.findings.append(Finding(
                         'The deductions add up to more than the pay', r2(r),
-                        f"On the {st['statement']} payslip the deductions add up to {_m(r)} more than the gap "
-                        f"between gross pay and take home pay, which cannot be right. One of the figures was "
-                        f"probably read wrongly from the scan. This employee is marked as not verified: please "
-                        f"check that payslip."))
+                        f"On the {st['statement']} payslip the deductions exceed gross pay less take home pay by "
+                        f"{_m(r)}.",
+                        'Ask payroll for a clean copy of both payslips.'))
     if emp.uncertainty and emp.uncertainty.get('cross_document'):
         known = {round(abs(f.amount), 2) for f in emp.findings if f.amount is not None}
         for d in emp.uncertainty['cross_document'].get('disagreements', []):
@@ -237,8 +234,8 @@ def audit_employee(emp: EmployeeAudit) -> EmployeeAudit:
                     'The statement and the proposal disagree',
                     r2(item['read'] - item['expected']),
                     f"On the {d['statement']} payslip the {item['field'].replace('_', ' ')} line shows "
-                    f"{_m(item['read'])}, but {item['source']} says it should be {_m(item['expected'])}. One of the "
-                    f"two is wrong and this tool does not assume which, so both figures are shown."))
+                    f"{_m(item['read'])} and {item['source']} gives {_m(item['expected'])}.",
+                    'Ask payroll for a clean copy of both payslips.'))
     # Decided last, once every finding is in: deciding it earlier let an employee be called correct while carrying
     # a finding that says the payslip cannot be trusted.
     emp.verdict, emp.verdict_class = _verdict(emp)
@@ -596,7 +593,7 @@ def _evidence(emp: EmployeeAudit) -> dict:
                       + (MED_RATE * (slip_prem or 0) if med_setting_open else 0.0)
                       + (SS_RATE + MED_RATE) * wrong_col_amount)
     explained_state = TOP_STATE * (pretax_missing_total + wrong_col_amount)
-    resid = lambda gap, explained: (0.0 if gap is None else max(0.0, abs(gap) - explained - 0.01))
+    resid = lambda gap, explained: (0.0 if gap is None else max(0.0, r2(abs(gap) - explained)))
     fed_residual_abs = resid(emp.federal_gap, explained_fed)
     fica_residual_abs = resid(emp.fica_gap, explained_fica)
     state_residual_abs = resid(emp.state_gap, explained_state)
@@ -745,11 +742,9 @@ def _attribute(emp: EmployeeAudit) -> list:
         d = getattr(pc, 'net_pay_disputed', None)
         if d:
             out.append(Finding('The statement shows two different net pay figures', d.get('difference'),
-                               f"The {tag} payslip shows take home pay twice and the two do not agree: the net pay "
-                               f"line says {_m(d.get('line'))} and the rest of the payslip says "
-                               f"{_m(d.get('corroborated'))}. The reconciliation uses "
-                               f"{_m(d.get('corroborated'))}, and this employee is marked as not verified rather "
-                               f"than the tool quietly picking one."))
+                               f"The {tag} payslip prints take home pay twice: the net pay line says "
+                               f"{_m(d.get('line'))} and the rest of the payslip gives {_m(d.get('corroborated'))}.",
+                               'Ask payroll for a clean copy of both payslips.'))
     if not out and emp.before.net_pay is None and emp.after.net_pay is None:
         out.append(Finding('No payslip found for this employee', None,
                            'No uploaded payslip belongs to this employee; nothing to compare. A files gap, not an employee finding.'))

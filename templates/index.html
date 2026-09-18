@@ -301,7 +301,8 @@ function detail(e) {
     h += '<div class="detail-section"><h4>The two payslips side by side' + (pp !== 12 ? ' (per pay, ' + pp + ' periods)' : '') + '</h4>' +
          '<table class="detail-table"><tr><th>Payroll line</th><th class="num">Before</th><th class="num">After</th><th class="num">Change</th></tr>';
     rows.forEach(l => { const ch = (l[1] === null || l[2] === null || l[1] === undefined || l[2] === undefined) ? null : Math.round((l[2] - l[1]) * 100) / 100;
-      h += '<tr><td>' + l[0] + '</td><td class="num">' + money(l[1]) + '</td><td class="num">' + money(l[2]) + '</td><td class="num">' + signed(ch) + '</td></tr>'; });
+      const cell = v => (v === null || v === undefined) ? '<span class="muted">not shown</span>' : money(v);
+      h += '<tr><td>' + l[0] + '</td><td class="num">' + cell(l[1]) + '</td><td class="num">' + cell(l[2]) + '</td><td class="num">' + (ch === null ? '' : signed(ch)) + '</td></tr>'; });
     h += '</table>';
     if (b.federal !== null && a.federal !== null && b.federal !== undefined && a.federal !== undefined)
       h += '<div class="sentence">Federal tax saved: ' + money(b.federal) + ' minus ' + money(a.federal) + ' = ' + money(Math.round((b.federal - a.federal) * 100) / 100) + ' per pay, ' + money(e.payroll_federal_savings) + ' a month.</div>';
@@ -325,7 +326,6 @@ function detail(e) {
        tr('Taxable income before', en.taxable_income_before, b.medicare_gross === null || b.medicare_gross === undefined ? null : Math.round(b.medicare_gross * pp / 12 * 100) / 100) +
        '</table></div>';
 
-  h += uncertainty(e);
   return h + '</div>';
 }
 function tr(label, eng, pay) {
