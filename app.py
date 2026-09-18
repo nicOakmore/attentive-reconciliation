@@ -105,11 +105,14 @@ def _work(job, census, rep, before, after, client, period):
                  (('Census', census), ('Proposal report', rep), ('Payroll before', before), ('Payroll after', after)) if blob]
         para = ''
         try:
-            para = groq_client.summary_paragraph(dict(client=client or 'the client', employees=summary['employees'],
-                                                      reconciled=summary['matched'], attributed=summary['attributed'],
-                                                      no_cause=summary['unexplained'], missing=summary['data_missing'],
-                                                      monthly_gap=summary['total_gap'], decreases=summary['decreases'],
-                                                      causes=[[k, v['employees'], v['amount']] for k, v in summary['causes'][:4]]))
+            from services import prose
+            para = prose.audit_paragraphs(summary, audits, client=client, period=period)
+            if not para:
+                para = groq_client.summary_paragraph(dict(client=client or 'the client', employees=summary['employees'],
+                                                          reconciled=summary['matched'], attributed=summary['attributed'],
+                                                          no_cause=summary['unexplained'], missing=summary['data_missing'],
+                                                          monthly_gap=summary['total_gap'], decreases=summary['decreases'],
+                                                          causes=[[k, v['employees'], v['amount']] for k, v in summary['causes'][:4]]))
         except Exception as e:
             notes.append(f'Summary paragraph unavailable: {str(e)[:120]}')
         for n in notes:                      # the run's own account of what it read belongs in the log
