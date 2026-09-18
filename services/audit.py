@@ -97,6 +97,7 @@ class Finding:
     label: str
     amount: Optional[float]
     detail: str
+    action: str = ''      # what to do about this one cause, from the rule that raised it
 
 
 @dataclass
@@ -227,8 +228,11 @@ def audit_employee(emp: EmployeeAudit) -> EmployeeAudit:
                         f"probably read wrongly from the scan. This employee is marked as not verified: please "
                         f"check that payslip."))
     if emp.uncertainty and emp.uncertainty.get('cross_document'):
+        known = {round(abs(f.amount), 2) for f in emp.findings if f.amount is not None}
         for d in emp.uncertainty['cross_document'].get('disagreements', []):
             for item in d['items']:
+                if round(abs(item['read'] - item['expected']), 2) in known:
+                    continue        # already reported, with its own action, by the cause that explains it
                 emp.findings.append(Finding(
                     'The statement and the proposal disagree',
                     r2(item['read'] - item['expected']),
@@ -317,13 +321,15 @@ def _actions(emp: EmployeeAudit) -> str:
     fmt = {k: (_m(v) if isinstance(v, (int, float)) else v) for k, v in ev.items()}
     steps, seen = [], set()
     for f in emp.findings:
-        tpl = _ACTIONS.get(f.label)
-        if not tpl:
-            continue
-        try:
-            step = tpl.format(**fmt)
-        except (KeyError, IndexError):
-            continue
+        step = getattr(f, 'action', '') or ''
+        if not step:
+            tpl = _ACTIONS.get(f.label)
+            if not tpl:
+                continue
+            try:
+                step = tpl.format(**fmt)
+            except (KeyError, IndexError):
+                continue
         if step not in seen:
             seen.add(step)
             steps.append(step)
@@ -680,6 +686,8 @@ def _evidence(emp: EmployeeAudit) -> dict:
         census_found=yn(getattr(c, 'found', True)),
         census_ss=(c.socialsec or ''), census_med=(c.medicare or ''),
         eng_fed_sav=e.federal_savings, pay_fed_sav=emp.payroll_federal_savings,
+        eng_state_sav=e.state_savings, pay_state_sav=emp.payroll_state_savings,
+        eng_fica_sav=((e.ss_savings or 0) + (e.medicare_savings or 0)), pay_fica_sav=emp.payroll_fica_savings,
         rerun_fix=rerun_fix,
         # residuals, net of what the known defects can account for
         fed_residual_abs=fed_residual_abs, fed_residual=sgn(emp.federal_gap, fed_residual_abs),
@@ -719,13 +727,19 @@ def _attribute(emp: EmployeeAudit) -> list:
     fmt = {k: (_m(v) if isinstance(v, (int, float)) else v) for k, v in ev.items()}
     fmt['ret_unnamed'] = _m(abs(ev['ret_unnamed'] or 0))
     templates = OR.details()
+    actions = OR.actions()
     for row in OR.solve('causeAttribution', ev):
         detail = templates.get(row.get('detail'), row.get('detail') or '')
+        action = actions.get(row.get('action'), '')
         try:
             detail = detail.format(**fmt)
         except (KeyError, IndexError):
             pass
-        out.append(Finding(row['label'], r2(row['amount']), detail))
+        try:
+            action = action.format(**fmt)
+        except (KeyError, IndexError):
+            action = ''
+        out.append(Finding(row['label'], r2(row['amount']), detail, action))
     # The statement's own inconsistencies are reported from the reading layer, not the rules table
     for tag, pc in (('before', b), ('after', a)):
         d = getattr(pc, 'net_pay_disputed', None)

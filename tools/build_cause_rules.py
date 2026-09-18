@@ -26,7 +26,7 @@ IN = ['ret_named_known', 'ret_missing_abs', 'ret_unnamed_abs', 'ret_unnamed_sign
       'fed_residual_abs', 'fica_residual_abs', 'state_residual_abs', 'promise_over_ceiling',
       'premium_stayed_taxable_abs', 'taxable_fell_extra_abs', 'premium_stayed_medicare_abs',
       'medicare_fell_extra_abs', 'reimb_short_abs', 'reimb_over_abs']
-OUTS = ['label', 'amount', 'detail']
+OUTS = ['label', 'amount', 'detail', 'action']
 
 Y = {"operator": "=", "value": "Y"}
 N = {"operator": "=", "value": "N"}
@@ -51,6 +51,7 @@ def row(name, conds, label, amount, detail):
                   ({"type": "common", "value": None} if amount is None
                    else {"type": "function", "value": amount})})
     cells.append({"column": "out_detail", "outputScalarValue": {"type": "common", "value": detail}})
+    cells.append({"column": "out_action", "outputScalarValue": {"type": "common", "value": detail}})
     return {"name": name, "active": True, "cells": cells}
 
 
@@ -176,42 +177,82 @@ ROWS = [
 ]
 
 DETAILS = {
-    "ret_named_exact": "Payroll takes {ret_missing} a month pre-tax for retirement and the census does not carry it, so the proposal taxed income payroll does not tax.",
+    "ret_named_exact": "Payroll takes {ret_missing} a month pre-tax for retirement; the census does not carry that retirement amount.",
     "ret_part_carried": "The census is short {ret_missing} a month of the pre-tax deduction payroll takes. The payslip names {ret_named} a month as retirement.",
     "ret_named_plus": "Payroll reduces federal wages by {ret_missing} a month more than the census carries. The payslip names {ret_named} of it as retirement and does not name the other {ret_unnamed}.",
     "ret_unnamed": "Payroll takes a pre-tax deduction of {ret_missing} a month that the payslip does not name and the census does not carry.",
-    "pretax_missing": "The proposal starts from {ti_gap_abs} a month more income than the payslip taxes, so a pre-tax deduction is missing from the census.",
-    "wrong_column": "The proposal starts {ti_gap_abs} a month low because a retirement amount sits in the census Other pre-tax column, which also cuts Social Security and Medicare wages. Payroll leaves retirement inside those wages.",
-    "ti_neg": "The proposal starts from {ti_gap_abs} a month less income than the payslip taxes, so a census pre-tax figure is too high.",
+    "pretax_missing": "The proposal starts from {ti_gap_abs} a month more income than the payslip taxes; the census does not carry a matching pre-tax deduction.",
+    "wrong_column": "The census carries {ti_gap_abs} a month of retirement in the Other pre-tax column, which also cuts Social Security and Medicare wages; payroll leaves retirement inside those wages.",
+    "ti_neg": "The proposal starts from {ti_gap_abs} a month less income than the payslip taxes; the census pre-tax amount is higher by {ti_gap_abs} a month.",
     "census_missing": "No census row carries this employee's payroll number or name.",
     "ss_on": "The report counts {eng_ss} a month of Social Security savings and neither payslip deducts Social Security.",
-    "ss_off": "The payslips deduct Social Security and the report counts no saving on it, so the promise leaves out {pay_ss_sav} a month.",
+    "ss_off": "Both payslips deduct Social Security and the report counts no saving on it; the payslips show {pay_ss_sav} a month attributable to that deduction.",
     "med_on": "The report counts {eng_med} a month of Medicare savings and neither payslip deducts Medicare.",
-    "med_off": "The payslips deduct Medicare and the report counts no saving on it, so the promise leaves out {pay_med_sav} a month.",
+    "med_off": "Both payslips deduct Medicare and the report counts no saving on it; the payslips show {pay_med_sav} a month attributable to that deduction.",
     "fee_mismatch": "The report worked the allotment out with a {fee_eng} monthly fee and payroll deducts {fee_pay}. The difference lands in the allotment every month.",
-    "salary_zero": "The proposal calculated this employee on zero income while the census carries {census_gross} of annual pay.",
-    "premium_mismatch": "The payslip deducts a premium of {premium_m} a month and the report used a different figure, so every saving sits on a different base.",
+    "salary_zero": "The proposal calculated this employee on zero income; the census carries {census_gross} of annual pay.",
+    "premium_mismatch": "The payslip deducts {premium_m} a month and the report uses a different premium amount.",
     "premium_not_pretax": "Of the {premium_m} premium, {premium_stayed_taxable} a month stayed inside federal taxable wages.",
     "premium_not_medicare": "Of the {premium_m} premium, {premium_stayed_medicare} a month stayed inside Medicare wages.",
-    "reimb_missing": "The premium of {premium_m} a month is deducted and never reimbursed, so the employee pays it.",
-    "reimb_partial": "The reimbursement is {reimb_short} a month below the {premium_m} premium, and that difference comes out of take home pay.",
-    "ret_changed": "The retirement deduction changed by {ret_change_size} a month between the two payslips, so the premium's own effect cannot be isolated.",
-    "fixed_fed": "Payroll withheld {fed_before_m} a month of federal tax on both payslips, so the premium produced no federal saving.",
-    "fed_zero": "Federal withholding is {fed_before_m} a month and the report promises {eng_fed_sav} of federal saving, which is more than the tax available.",
+    "reimb_missing": "The payslip deducts a {premium_m} monthly premium and shows no reimbursement for that premium.",
+    "reimb_partial": "The payslip shows a {premium_m} premium and a reimbursement {reimb_short} a month lower.",
+    "ret_changed": "The retirement deduction changed by {ret_change_size} a month between the two payslips.",
+    "fixed_fed": "Federal tax withheld is {fed_before_m} a month on both payslips.",
+    "fed_zero": "The payslip shows {fed_before_m} a month of federal withholding; the report promises {eng_fed_sav} a month of federal saving.",
     "w4_diff": "Payroll and the census hold different W-4 details: {w4_text}.",
-    "gross_moved": "Gross pay changed by {gross_moved_abs} a month between the two payslips, so more than the premium changed.",
-    "identity_fee_stmt": "The payslip figures are out by {identity_gap} a month: tax saved less the fee does not equal the take home change. This employee is not verified.",
-    "identity_fee_prop": "The payslip figures are out by {identity_gap} a month, with the fee taken from the report because the payslip prints none. This employee is not verified.",
+    "gross_moved": "Gross pay changed by {gross_moved_abs} a month between the two payslips.",
+    "identity_fee_stmt": "The payslip figures are out by {identity_gap} a month: tax saved less the fee does not equal the take home change.",
+    "identity_fee_prop": "The payslip figures are out by {identity_gap} a month, with the fee taken from the report because the payslip prints none.",
     "report_internal": "The report's own arithmetic is out by {report_int_gap} a month: gross savings less the fee does not equal the allotment it promises.",
-    "fed_mismatch": "{fed_residual_abs} a month of the federal difference is not accounted for by the corrections above. The report promises {eng_fed_sav} and payroll saved {pay_fed_sav}.",
+    "fed_mismatch": "Payroll saved {pay_fed_sav} a month of federal tax and the report promises {eng_fed_sav}, leaving {fed_residual_abs} a month the corrections above do not account for.",
     "census_ss_not_n": "Neither payslip deducts Social Security and the census does not carry N for this employee.",
     "census_ss_not_y": "Both payslips deduct Social Security and the census carries N for this employee.",
     "census_med_not_n": "Neither payslip deducts Medicare and the census does not carry N for this employee.",
-    "state_generic": "State withholding differs from the report by {state_residual_abs} a month beyond what the corrections above explain.",
-    "fica": "Social Security and Medicare withheld differ from the report by {fica_residual_abs} a month beyond what the corrections above explain.",
-    "taxable_fell_extra": "Federal taxable wages fell {taxable_fell_extra} a month more than the {premium_m} premium, so something besides the premium reduced them.",
-    "medicare_fell_extra": "Medicare wages fell {medicare_fell_extra} a month more than the {premium_m} premium, so something besides the premium reduced them.",
-    "reimb_over": "The reimbursement is {reimb_over} a month above the {premium_m} premium.",
+    "state_generic": "Payroll saved {pay_state_sav} a month of state tax and the report promises {eng_state_sav}, leaving {state_residual_abs} a month the corrections above do not account for.",
+    "fica": "Payroll saved {pay_fica_sav} a month of Social Security and Medicare and the report promises {eng_fica_sav}, leaving {fica_residual_abs} a month the corrections above do not account for.",
+    "taxable_fell_extra": "Federal taxable wages fell {taxable_fell_extra} a month more than the {premium_m} premium.",
+    "medicare_fell_extra": "Medicare wages fell {medicare_fell_extra} a month more than the {premium_m} premium.",
+    "reimb_over": "The payslip shows a {premium_m} premium and a reimbursement {reimb_over} a month higher.",
+}
+
+
+ACTIONS = {
+ "ret_named_exact": "Put {ret_missing} a month in the census 401-k/IRA column.",
+ "ret_named_plus": "Put {ret_named} a month in the census 401-k/IRA column. Ask payroll what the other {ret_unnamed} a month pre-tax deduction is before adding it to the census.",
+ "ret_part_carried": "Increase the census 401-k/IRA column by {ret_missing} a month.",
+ "ret_unnamed": "Ask payroll what the {ret_missing} a month pre-tax deduction is, then add it to the census in the column that matches.",
+ "pretax_missing": "Ask payroll which pre-tax deduction accounts for {ti_gap_abs} a month, then add it to the census.",
+ "wrong_column": "Move the retirement amount from the census Other pre-tax column to the 401-k/IRA column.",
+ "ti_neg": "Reduce the census pre-tax fields by {ti_gap_abs} a month to match the payslip.",
+ "census_missing": "Add this employee to the census.",
+ "ss_on": "Set the census SocialSec column to N.",
+ "census_ss_not_n": "Set the census SocialSec column to N.",
+ "census_ss_not_y": "Set the census SocialSec column to Y.",
+ "ss_off": "Set the census SocialSec column to Y.",
+ "census_med_not_n": "Set the census Medicare column to N.",
+ "med_on": "Set the census Medicare column to N.",
+ "med_off": "Set the census Medicare column to Y.",
+ "fee_mismatch": "Set the employee fee in the proposal program settings to {fee_pay} a month.",
+ "salary_zero": "Set the buffer in the proposal program settings to 100.",
+ "premium_mismatch": "Set the premium in the proposal program settings to {premium_m} a month.",
+ "premium_not_pretax": "Payroll must take the whole premium pre-tax.",
+ "taxable_fell_extra": "Ask payroll for a mock in which only the premium changes.",
+ "premium_not_medicare": "Payroll must take the whole premium out of Medicare wages.",
+ "medicare_fell_extra": "Ask payroll for a mock in which only the premium changes.",
+ "reimb_missing": "Payroll must add the reimbursement line.",
+ "reimb_partial": "Payroll must set the reimbursement to {premium_m} a month.",
+ "reimb_over": "Payroll must set the reimbursement to {premium_m} a month.",
+ "ret_changed": "Ask payroll for a mock in which only the premium changes.",
+ "fixed_fed": "Ask payroll why federal withholding did not move.",
+ "fed_zero": "Reduce the promised federal saving to {fed_before_m} a month.",
+ "w4_diff": "Correct the census W-4 columns to match payroll.",
+ "gross_moved": "Ask payroll for a mock in which only the premium changes.",
+ "identity_fee_stmt": "Ask payroll for a clean copy of both payslips.",
+ "identity_fee_prop": "Ask payroll for a clean copy of both payslips.",
+ "report_internal": "Regenerate the proposal report.",
+ "fed_mismatch": "Check the census W-4 details and additional federal withholding against the payslip; if they match, payroll must account for the remaining {fed_residual_abs} a month.",
+ "state_generic": "Check the census state marital status and withholding dependents against the payslip.",
+ "fica": "Check the census pay frequency against the payslip.",
 }
 
 
@@ -236,9 +277,12 @@ def main():
                 for b in banned:
                     if b in lab:
                         raise SystemExit(f'forbidden wording "{b}" in label of {r["name"]}')
+    missing_actions = refs - set(ACTIONS)
+    if missing_actions:
+        raise SystemExit(f'rules with no action: {sorted(missing_actions)}')
     doc = {"export": {"data": {"rules": [{"ruleAlias": "causeAttribution", "type": "decision-table",
                                           "decisionTable": {"columns": columns, "rows": ROWS}}],
-                               "details": DETAILS}}}
+                               "details": DETAILS, "actions": ACTIONS}}}
     with open(OUT, 'w') as f:
         json.dump(doc, f, indent=1)
     print(f'wrote {OUT}: {len(ROWS)} rows, {len(IN)} inputs, {len(DETAILS)} details')

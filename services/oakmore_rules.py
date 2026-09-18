@@ -24,12 +24,18 @@ def _get_rules():
             data = json.load(fh)
         _RULES = {r["ruleAlias"]: r for r in data["export"]["data"]["rules"]}
         _RULES["__details__"] = data["export"]["data"].get("details", {})
+        _RULES["__actions__"] = data["export"]["data"].get("actions", {})
     return _RULES
 
 
 def details():
     """The detail templates that ship next to the rules, keyed by detail id."""
     return _get_rules().get("__details__", {})
+
+
+def actions():
+    """The action each rule prescribes, keyed by the same id as its detail."""
+    return _get_rules().get("__actions__", {})
 
 
 # ---------------------------------------------------------------------------
