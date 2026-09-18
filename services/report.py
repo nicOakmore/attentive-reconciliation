@@ -222,8 +222,30 @@ def employee_block(doc, a, client=''):
     elif a.engine.allotment is None or a.actual_net_change is None:
         miss = 'the proposal allotment' if a.engine.allotment is None else 'net pay on both statements'
         _p(doc, f"Allotment against actual net pay cannot be reconciled because {miss} is unavailable.")
+    _social_security_line(doc, a)
     _uncertainty_block(doc, a)
     _p(doc, _resolution(a), bold=True, space_after=14)
+
+
+def _social_security_line(doc, a):
+    """One explicit line per employee on Social Security, so its absence is never silent. A TRS payroll deducts
+    none and a proposal must promise none; when the two disagree the cause block above already says so."""
+    slips = a.before.net_pay is not None or a.after.net_pay is not None
+    if not slips:
+        return
+    on_slips = (a.before.social_security or 0) > 0.005 or (a.after.social_security or 0) > 0.005
+    claimed = (a.engine.ss_savings or 0) > 0.02
+    if on_slips and claimed:
+        _p(doc, 'Social Security: the payslips deduct it and the proposal counts a saving on it. Consistent.')
+    elif not on_slips and not claimed:
+        _p(doc, 'Social Security: the payslips deduct none and the proposal promises no saving on it. Consistent '
+                'with a TRS payroll outside Social Security.')
+    elif claimed:
+        _p(doc, 'Social Security: the proposal counts a saving on it but the payslips deduct none. See the cause '
+                'above: it should be switched off for this employee.')
+    else:
+        _p(doc, 'Social Security: the payslips deduct it but the proposal claims no saving on it. See the cause '
+                'above.')
 
 
 def _uncertainty_block(doc, a):
@@ -308,6 +330,9 @@ def _resolution(a):
         if f.label == 'The premium on the payslip is not the premium in the proposal':
             return ('What to do: make the premium on the payslip and the premium in the proposal the same, then '
                     'run both again. Nothing computed from two different premiums can agree.')
+        if f.label == 'A misread figure was corrected from the census and the statement arithmetic':
+            return ('Nothing to correct on the census. One line on the scan was read wrongly; the audit used the '
+                    'figure the census and the statement arithmetic agree on, and says which line to check.')
     labels = {f.label for f in a.findings}
     if 'The statement does not add up' in labels:
         return ('What to do: look at this employee\'s two payslips. Their own figures do not add up, so nothing '

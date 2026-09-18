@@ -182,6 +182,35 @@ def audit_employee(emp: EmployeeAudit) -> EmployeeAudit:
 
     emp.findings = _attribute(emp)
     emp.uncertainty = _uncertainty(emp)
+    # Where a payslip does not add up and the census plus the statement's own arithmetic say decisively what one
+    # misread line must have been, the audit uses the corrected figure and reports the correction, instead of
+    # accepting a printed number the page itself contradicts. One pass only: a correction never begets another.
+    if emp.uncertainty and not getattr(emp, '_correction_pass', False):
+        applied = []
+        for st in (emp.uncertainty.get('statements') or []):
+            ml = st.get('most_likely') or {}
+            reads = ml.get('readings') or []
+            if not (ml.get('decisive') and reads):
+                continue
+            top_v, fld, obs = reads[0].get('value'), ml.get('field'), ml.get('observed')
+            if top_v is None or fld is None or obs is None or abs(top_v - obs) <= 0.02:
+                continue
+            pc = emp.before if st['statement'] == 'before' else emp.after
+            setattr(pc, fld, top_v)
+            applied.append((st['statement'], fld, obs, top_v, ml.get('source') or ''))
+        if applied:
+            emp._correction_pass = True
+            emp.findings = []
+            audit_employee(emp)
+            for tag, fld, obs, new, src in applied:
+                emp.findings.append(Finding(
+                    'A misread figure was corrected from the census and the statement arithmetic', r2(new - obs),
+                    f"On the {tag} payslip the {fld.replace('_', ' ')} line was read as {_m(obs)}, but the page "
+                    f"does not add up with that figure and does with {_m(new)}"
+                    + (f", which {src} also gives" if src else '')
+                    + f". The audit uses {_m(new)}. The correction is reported so a reader can check that line "
+                    f"on the scan."))
+            return emp
     if emp.uncertainty:
         for st in (emp.uncertainty.get('statements') or []):
             for nm, r in (st.get('residuals') or {}).items():
@@ -263,6 +292,8 @@ def _uncertainty(emp):
             post = E.most_likely_reading(rec, top, expectations=exps.get(tag))
             if post.get('posterior'):
                 entry['most_likely'] = dict(field=top, observed=post.get('observed'),
+                                            decisive=post.get('decisive'),
+                                            source=post.get('cross_document_source'),
                                             readings=post['posterior'][:3])
             out.setdefault('statements', []).append(entry)
         # The conclusion as a fuzzy number: where a figure could not be pinned, the gap is a range with a degree
