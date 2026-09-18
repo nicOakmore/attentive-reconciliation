@@ -548,7 +548,7 @@
           "column": "out_label",
           "outputScalarValue": {
            "type": "common",
-           "value": "Retirement deduction missing from the census"
+           "value": "A pre-tax deduction is missing from the census"
           }
          },
          {

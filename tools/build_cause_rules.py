@@ -64,7 +64,7 @@ ROWS = [
         "Retirement deduction missing from the census", "{ret_missing}", "ret_named_exact"),
     row("retirement named, with a further unnamed pre-tax deduction",
         {"ret_named_known": Y, "ret_missing_abs": gt(1.0), "ret_unnamed_signed": gt(0.02)},
-        "Retirement deduction missing from the census", "{ret_missing}", "ret_named_plus"),
+        "A pre-tax deduction is missing from the census", "{ret_missing}", "ret_named_plus"),
     row("the census carries part of the pre-tax deduction payroll takes",
         {"ret_named_known": Y, "ret_missing_abs": gt(1.0), "ret_unnamed_signed": lt(-0.02)},
         "Retirement deduction missing from the census", "{ret_missing}", "ret_part_carried"),
