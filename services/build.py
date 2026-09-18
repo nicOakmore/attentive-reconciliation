@@ -76,7 +76,8 @@ def run(census_bytes=None, report_bytes=None, before=None, after=None, before_na
                    w4_year=int(P.num(cen_row.get('w4_year')) or 0) or None,
                    dependents=P.num(cen_row.get('dependents')), step2c=str(cen_row.get('step2c') or '').strip(),
                    step3=P.num(cen_row.get('step3')), additional_federal=P.num(cen_row.get('additional_federal')),
-                   additional_state=P.num(cen_row.get('additional_state')), state=str(cen_row.get('state') or '').strip())
+                   additional_state=P.num(cen_row.get('additional_state')), state=str(cen_row.get('state') or '').strip(),
+                   found=bool(cen_row))
         e = Engine(federal_before=P.num(r.get('federal_tax_before_premium')), federal_savings=P.num(r.get('federal_savings')),
                    state_savings=P.num(r.get('state_savings')), ss_savings=P.num(r.get('social_security_savings')),
                    medicare_savings=P.num(r.get('medicare_savings')), gross_savings=P.num(r.get('ee_gross_monthly_savings')),

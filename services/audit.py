@@ -87,6 +87,7 @@ class Census:
     additional_federal: Optional[float] = None
     additional_state: Optional[float] = None
     state: str = ''
+    found: bool = True          # a census row actually matched this employee
 
 
 @dataclass
@@ -231,25 +232,6 @@ def audit_employee(emp: EmployeeAudit) -> EmployeeAudit:
                     f"On the {d['statement']} payslip the {item['field'].replace('_', ' ')} line shows "
                     f"{_m(item['read'])}, but {item['source']} says it should be {_m(item['expected'])}. One of the "
                     f"two is wrong and this tool does not assume which, so both figures are shown."))
-    # One explicit line on Social Security, so its absence is never silent: a TRS payroll deducts none and a
-    # proposal must promise none; when the two disagree the cause findings already carry the amount.
-    if b.net_pay is not None or a.net_pay is not None:
-        on_slips = (b.social_security or 0) > 0.005 or (a.social_security or 0) > 0.005
-        claimed = (e.ss_savings or 0) > 0.02
-        if on_slips and claimed:
-            emp.ss_note = 'Social Security: the payslips deduct it and the proposal counts a saving on it. Consistent.'
-        elif not on_slips and not claimed:
-            emp.ss_note = ('Social Security: the payslips deduct none and the proposal promises no saving on it. '
-                           'Consistent with a TRS payroll outside Social Security. Whenever the proposal is run '
-                           'for this employee, Social Security must be set to N, in the census SocialSec column '
-                           'or the proposal settings.')
-        elif claimed:
-            emp.ss_note = ('Social Security: the proposal counts a saving on it but the payslips deduct none. '
-                           'Social Security must be set to N for this employee, in the census SocialSec column or '
-                           'the proposal settings, and the proposal run again.')
-        else:
-            emp.ss_note = ('Social Security: the payslips deduct it but the proposal claims no saving on it. See '
-                           'the cause above.')
     # Decided last, once every finding is in: deciding it earlier let an employee be called correct while carrying
     # a finding that says the payslip cannot be trusted.
     emp.verdict, emp.verdict_class = _verdict(emp)
@@ -393,6 +375,32 @@ def _evidence(emp: EmployeeAudit) -> dict:
     slip_prem = per_month(a.premium, pp) if a.premium is not None else None
     premium_known = slip_prem is not None and e.premium is not None
     premium_gap = r2(slip_prem - e.premium) if premium_known else None
+    # payroll execution of the premium: pre-tax treatment, Medicare wages, reimbursement
+    tw_change = (per_month(b.taxable_wages - a.taxable_wages, pp)
+                 if b.taxable_wages is not None and a.taxable_wages is not None else None)
+    pretax_known = tw_change is not None and slip_prem is not None
+    premium_pretax_gap = r2(slip_prem - tw_change) if pretax_known else None
+    medg_change = (per_month(b.medicare_gross - a.medicare_gross, pp)
+                   if b.medicare_gross is not None and a.medicare_gross is not None else None)
+    medg_known = medg_change is not None and slip_prem is not None
+    medg_gap = r2(slip_prem - medg_change) if medg_known else None
+    reimb_m = per_month(a.reimbursement, pp) if a.reimbursement is not None else None
+    reimb_gap = r2(abs(reimb_m) - slip_prem) if reimb_m is not None and slip_prem is not None else None
+    reimb_missing_sig = (reimb_m is None and slip_prem is not None and slip_prem > 0
+                         and emp.identity_gap is not None
+                         and abs(emp.identity_gap + slip_prem) <= max(2.0, 0.02 * slip_prem))
+    med_read = b.medicare is not None or a.medicare is not None
+    med_on_slips = (b.medicare or 0) > 0.005 or (a.medicare or 0) > 0.005
+    eng_med = e.medicare_savings
+    pay_med_sav = per_month((b.medicare or 0) - (a.medicare or 0), pp)
+    med_mismatch = (slips_present and med_read
+                    and (((eng_med or 0) > 0.02 and not med_on_slips)
+                         or (med_on_slips and eng_med is not None and eng_med <= 0.02
+                             and (pay_med_sav or 0) > 0.02)))
+    ret_change = (per_month(b.retirement - a.retirement, pp)
+                  if b.retirement is not None and a.retirement is not None else None)
+    report_int_known = (e.gross_savings is not None and e.fee is not None and e.allotment is not None)
+    report_int_gap = r2(e.gross_savings - e.fee - e.allotment) if report_int_known else None
     gross_moved = (per_month(a.gross - b.gross, pp)
                    if b.gross is not None and a.gross is not None else None)
     identity_broken = emp.identity_gap is not None and abs(emp.identity_gap) > 2.0
@@ -446,6 +454,21 @@ def _evidence(emp: EmployeeAudit) -> dict:
         state_is_mo=yn(b.state_code == 'MO'),
         fica_gap=emp.fica_gap,
         fica_gap_abs=abs(emp.fica_gap) if emp.fica_gap is not None else None,
+        premium_m=slip_prem,
+        pretax_known=yn(pretax_known), premium_pretax_gap=premium_pretax_gap,
+        premium_pretax_gap_abs=abs(premium_pretax_gap) if premium_pretax_gap is not None else None,
+        medg_known=yn(medg_known), medg_gap=medg_gap,
+        medg_gap_abs=abs(medg_gap) if medg_gap is not None else None,
+        reimb_known=yn(reimb_m is not None), reimb_gap=reimb_gap,
+        reimb_gap_abs=abs(reimb_gap) if reimb_gap is not None else None,
+        reimb_missing_sig=yn(reimb_missing_sig),
+        med_read=yn(med_read), med_on_slips=yn(med_on_slips),
+        eng_med=eng_med, eng_med_known=yn(eng_med is not None), pay_med_sav=pay_med_sav,
+        med_mismatch=yn(med_mismatch),
+        ret_change=ret_change, ret_change_abs=abs(ret_change) if ret_change is not None else None,
+        report_int_known=yn(report_int_known), report_int_gap=report_int_gap,
+        report_int_gap_abs=abs(report_int_gap) if report_int_gap is not None else None,
+        census_found=yn(getattr(c, 'found', True)),
     )
 
 
@@ -455,9 +478,10 @@ def _attribute(emp: EmployeeAudit) -> list:
     and puts the matched rows into words."""
     from . import oakmore_rules as OR
     out, b, a = [], emp.before, emp.after
-    if emp.allotment_gap is not None and abs(emp.allotment_gap) <= CENT:
-        out.append(Finding('Match', emp.allotment_gap,
-                           'The employee takes home exactly what the proposal promised.'))
+    if emp.allotment_gap is not None and emp.allotment_gap >= -CENT:
+        # The payment is not down: green, and that is it. No cause hunt on an employee who takes
+        # home at least what was promised.
+        out.append(Finding('Match', emp.allotment_gap, 'Takes home at least what was promised.'))
         return out
     ev = _evidence(emp)
     fmt = {k: (_m(v) if isinstance(v, (int, float)) else v) for k, v in ev.items()}
@@ -482,12 +506,10 @@ def _attribute(emp: EmployeeAudit) -> list:
                                f"than the tool quietly picking one."))
     if not out and emp.before.net_pay is None and emp.after.net_pay is None:
         out.append(Finding('No payslip found for this employee', None,
-                           'None of the payslips uploaded belong to this employee, so there is nothing to compare '
-                           'the proposal against. This is about the files provided, not about the employee.'))
+                           'No uploaded payslip belongs to this employee; nothing to compare. A files gap, not an employee finding.'))
     elif not out:
         out.append(Finding('No cause could be established', emp.allotment_gap,
-                           'The files provided do not explain this difference. The payslip lines needed to work it '
-                           'out are missing or could not be read.'))
+                           'The files provided do not explain this difference: the payslip lines needed are missing or unreadable.'))
     return out
 
 
@@ -505,15 +527,14 @@ def _verdict(emp: EmployeeAudit):
         return 'Not verified: the deductions on the payslip do not add up', 'red'
     if 'The statement does not add up' in labels:
         return 'Not verified: the payslip figures do not add up', 'red'
-    if abs(g) <= CENT:
-        return 'Correct: the employee takes home what was promised', 'green'
+    if g >= -CENT:
+        return 'Correct: takes home what was promised', 'green'
     if 'No cause could be established' in labels:
         return 'Difference found, cause not established', 'red'
-    side = 'less' if g < 0 else 'more'
     if emp.actual_net_change is not None and emp.actual_net_change < 0:
-        return (f'Take home pay falls, and it is {_m(abs(g))} a month {side} than promised. See the cause below',
+        return (f'Take home pay falls {_m(abs(emp.actual_net_change))} a month, {_m(abs(g))} short of the promise',
                 'yellow')
-    return f'Takes home {_m(abs(g))} a month {side} than promised. See the cause below', 'yellow'
+    return f'Takes home {_m(abs(g))} a month less than promised', 'yellow'
 
 
 def summarise(audits: list) -> dict:

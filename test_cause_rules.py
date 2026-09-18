@@ -61,14 +61,22 @@ check('ss_off fires', 'The payroll pays Social Security the proposal ignores' in
 
 # 4. the fee in the proposal is not the fee payroll deducts
 e = base()
-e.after.fee = 89                       # payroll took 89, proposal promised at 114
-e.after.net_pay = 4598.78              # the 25 lands in take home
+e.after.fee = 130                      # payroll deducts 130, proposal promised at 114
+e.after.net_pay = 4557.78              # the 16 comes out of take home
 ls = labels(e)
 check('fee fires', 'The employee fee in the proposal is not the fee payroll deducts' in ls, str(ls))
-e = base(); e.after.fee = 89; e.after.net_pay = 4598.78
+e = base(); e.after.fee = 130; e.after.net_pay = 4557.78
 amt = [f.amount for f in audit_employee(e).findings
        if f.label == 'The employee fee in the proposal is not the fee payroll deducts']
-check('fee amount +25', amt and abs(amt[0] - 25.0) < 0.01, str(amt))
+check('fee amount -16', amt and abs(amt[0] + 16.0) < 0.01, str(amt))
+
+# the green gate: an employee who takes home MORE than promised is green, no cause hunt
+e = base()
+e.after.fee = 89
+e.after.net_pay = 4598.78
+a = audit_employee(e)
+check('above promise is green', a.verdict_class == 'green', a.verdict_class)
+check('above promise carries no causes', [f.label for f in a.findings] == ['Match'], str([f.label for f in a.findings]))
 
 # 5. a deduction sits in the wrong census column
 e = base()
@@ -83,7 +91,7 @@ check('wrong column fires', 'A deduction sits in the wrong census column' in ls,
 e = base()
 e.engine.taxable_income_before = 0.0
 e.engine.allotment = 0.0
-e.after.net_pay = 4573.78
+e.after.net_pay = 4490.00              # take home actually falls
 ls = labels(e)
 check('salary zero fires', 'The proposal calculated on no income at all' in ls, str(ls))
 
@@ -133,4 +141,44 @@ if FAIL:
     for f in FAIL:
         print('  ' + f)
     sys.exit(1)
-print('cause-rules unit tests PASS (14 checks)')
+print(f'cause-rules unit tests PASS')
+
+# ---- per-field rules, one synthetic case each (kept from the catalogue build) --------
+def base2():
+    return EmployeeAudit(name='CASE', pay_periods=12,
+        census=Census(gross_annual=79935.83, pay_periods=12, pretax_other=270, retirement_401k=549.58,
+                      filing_status='S', state='TX'),
+        engine=Engine(federal_savings=170.77, state_savings=0, ss_savings=0, medicare_savings=17.01,
+                      gross_savings=187.78, fee=114, allotment=73.78, taxable_income_before=6391.32, premium=1173),
+        before=Paycheck(gross=6661.31, federal=549.35, state=0, medicare=92.67, taxable_wages=5841.75,
+                        medicare_gross=6391.31, net_pay=4500.00, retirement=549.56, retirement_line=True),
+        after=Paycheck(gross=6661.31, federal=378.58, state=0, medicare=75.67, taxable_wages=4668.75,
+                       medicare_gross=5218.31, net_pay=4560.00, premium=1173, reimbursement=1173, fee=114,
+                       retirement=549.56, retirement_line=True))
+
+
+def L2(e):
+    return [f.label for f in audit_employee(e).findings]
+
+
+e = base2(); e.after.taxable_wages = 5000.00
+check('premium_not_pretax', 'The premium was not taken pre-tax in full' in L2(e), str(L2(e)))
+e = base2(); e.after.medicare_gross = 6000.00
+check('premium_not_medicare', 'The premium did not come out of Medicare wages in full' in L2(e), str(L2(e)))
+e = base2(); e.after.reimbursement = 900.00
+check('reimb_partial', 'The reimbursement does not return the whole premium' in L2(e), str(L2(e)))
+e = base2(); e.after.retirement = 430.00
+check('ret_changed', 'The retirement deduction changed with the premium' in L2(e), str(L2(e)))
+e = base2(); e.before.medicare = 0.0; e.after.medicare = 0.0
+check('med_on', 'The proposal counts Medicare savings this payroll never pays' in L2(e), str(L2(e)))
+e = base2(); e.engine.allotment = 90.00
+check('report_internal', 'The proposal report does not add up internally' in L2(e), str(L2(e)))
+e = base2(); e.census.found = False
+check('census_missing', 'No census row matches this employee' in L2(e), str(L2(e)))
+
+if FAIL:
+    print(f'per-field FAIL ({len(FAIL)})')
+    for f in FAIL:
+        print('  ' + f)
+    sys.exit(1)
+print('per-field rule tests PASS (7)')

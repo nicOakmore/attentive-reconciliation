@@ -71,12 +71,9 @@ def _census_sentence(a):
         bits.append(f"{money(c.pretax_other)} of other pre-tax deductions in field Q")
     if c.retirement_401k:
         bits.append(f"{money(c.retirement_401k)} for retirement in field R")
-    s = ('The census gave the proposal no pre-tax deductions at all.' if not bits else
-         f"The census shows {', '.join(bits)}, so the proposal worked with "
-         f"{money(a.census_pretax)} a month of pre-tax deductions.")
+    s = ('Census pre-tax: none.' if not bits else f"Census pre-tax: {', '.join(bits)}.")
     if a.retirement_not_in_census and abs(a.retirement_not_in_census) > 0.02:
-        s += (f" The payslip takes off a further {money(a.retirement_not_in_census)} a month before federal tax "
-              f"which the census does not show, so the proposal worked from a higher income than payroll taxes.")
+        s += f" Payroll takes another {money(a.retirement_not_in_census)} a month pre-tax that the census does not carry."
     return s
 
 
@@ -179,7 +176,7 @@ def employee_block(doc, a, client=''):
     _keep(_p(doc, 'Why', size=9.5, bold=True, color=NAVY, space_after=2))
     named = [f for f in a.findings if f.label not in ('Match', 'No cause could be established', 'No payslip found for this employee')]
     if a.verdict_class == 'green':
-        _p(doc, 'No discrepancy identified. The engine allotment equals the actual net pay change.')
+        _p(doc, 'No shortfall: the employee takes home at least what was promised.')
     elif any(f.label == 'No payslip found for this employee' for f in a.findings):
         _p(doc, 'No payroll statement in the packs supplied matched this employee, so the engine figures stand '
                 'unreconciled. This is a coverage limit of the files, not a discrepancy.')
@@ -222,44 +219,46 @@ def employee_block(doc, a, client=''):
     elif a.engine.allotment is None or a.actual_net_change is None:
         miss = 'the proposal allotment' if a.engine.allotment is None else 'net pay on both statements'
         _p(doc, f"Allotment against actual net pay cannot be reconciled because {miss} is unavailable.")
-    _social_security_line(doc, a)
     _uncertainty_block(doc, a)
-    _p(doc, _resolution(a), bold=True, space_after=14)
-
-
-def _social_security_line(doc, a):
-    """One explicit line per employee on Social Security, so its absence is never silent. The wording is decided
-    once, in the audit, and shown identically here and in the web panel."""
-    note = getattr(a, 'ss_note', '')
-    if note:
-        _p(doc, note)
+    res = _resolution(a)
+    if res:
+        _p(doc, res, bold=True, space_after=14)
+    else:
+        _p(doc, '', space_after=14)
 
 
 def _uncertainty_block(doc, a):
-    """Where the statements do not tie, say what the reading uncertainty implies. Every figure here is modelled and
-    labelled as such: it does not replace anything printed on the payroll, and it does not close the exception."""
-    u = getattr(a, 'uncertainty', None)
-    if not u or (not u.get('statements') and not u.get('gap_interval')):
+    """One line per fact about reading reliability, and only when it matters: never on a verified employee,
+    never when the modelled interval is immaterial. Modelled figures stay labelled as modelled."""
+    if a.verdict_class == 'green':
         return
-    _keep(_p(doc, 'How sure we are of the figures read from the payslip', size=9.5, bold=True, color=NAVY, space_after=2))
+    u = getattr(a, 'uncertainty', None)
+    if not u:
+        return
+    lines = []
     for st in (u.get('statements') or []):
-        names = ', '.join(f"{s['field'].replace('_', ' ')} at {s['probability']:.0%}" for s in st['suspects'])
-        _p(doc, f"On the {st['statement']} statement the line least consistent with the others is {names}. "
-                f"This is a probability under the reading error model measured on statements whose figures are "
-                f"known, not a statement about the payroll.")
-        ml = st.get('most_likely')
-        if ml and ml.get('readings'):
-            best = ml['readings'][0]
-            _p(doc, f"Read as {money(ml.get('observed'))}. Under the same model the most likely printed value is "
-                    f"{money(best['value'])} with probability {best['probability']:.0%}. The figure used in this "
-                    f"report remains the one read from the page.")
+        ml = st.get('most_likely') or {}
+        best = (ml.get('readings') or [{}])[0]
+        if best.get('value') is not None and ml.get('observed') is not None \
+                and abs(best['value'] - ml['observed']) > 0.02:
+            lines.append(f"{st['statement'].capitalize()} payslip: the {ml['field'].replace('_', ' ')} read "
+                         f"({money(ml['observed'])}) is the least reliable line; most likely printed value "
+                         f"{money(best['value'])}. The read value stands.")
+    for d in (u.get('derived') or []):
+        flds = ', '.join(f"{k.replace('_', ' ')} {money(v['value'])}" for k, v in (d.get('fields') or {}).items())
+        if flds:
+            lines.append(f"{d['statement'].capitalize()} payslip: derived from the page's arithmetic, not read: "
+                         f"{flds}.")
     iv = u.get('gap_interval')
-    if iv:
-        _p(doc, f"Carrying the reading error through to the conclusion, the gap between allotment and net pay "
-                f"change has a modelled 95 per cent interval of {money(iv['low'])} to {money(iv['high'])}, median "
-                f"{money(iv['median'])}, from {iv['draws']:,} draws. The chance the gap exceeds "
-                f"{money(iv['materiality'])} either way is {iv['probability_beyond_materiality']:.0%}. This "
-                f"interval is modelled from the reading uncertainty and is not a payroll figure.", space_after=6)
+    if iv and (iv.get('probability_beyond_materiality') or 0) >= 0.05:
+        lines.append(f"Reading error carried through: the gap could be {money(iv['low'])} to {money(iv['high'])}; "
+                     f"chance it exceeds {money(iv['materiality'])} is "
+                     f"{iv['probability_beyond_materiality']:.0%}. Modelled.")
+    if not lines:
+        return
+    _keep(_p(doc, 'Reading reliability', size=9.5, bold=True, color=NAVY, space_after=2))
+    for ln in lines:
+        _p(doc, ln, space_after=2)
 
 
 def _verdict_sentence(a):
@@ -283,63 +282,13 @@ def _verdict_sentence(a):
 def _resolution(a):
     """What to do next, in words the person holding the census can act on."""
     if a.verdict_class == 'green':
-        return 'Nothing to do. The payslips and the proposal agree to the cent.'
-    for f in a.findings:
-        if f.label in ('Retirement deduction missing from the census', 'A pre-tax deduction is missing from the census'):
-            base = (a.census.pretax_other or 0)
-            return (f"What to do: check where {money(f.amount)} a month of pre-tax deductions belongs on the "
-                    f"census. If it goes in the same field as the other pre-tax deductions, that field becomes "
-                    f"{money(round(base + (f.amount or 0), 2))}. Then run the proposal again and compare.")
-        if f.label == 'A pre-tax deduction is missing from the census':
-            return (f"What to do: find the {money(f.amount)} a month deduction on the payslip, add it to the census "
-                    f"as a pre-tax deduction, and run the proposal again.")
-        if f.label == 'The W-4 on payroll differs from the census':
-            return ('What to do: agree which W-4 details are current, payroll\'s or the census\'s, correct the '
-                    'census and run the proposal again.')
-        if f.label == 'The proposal counts Social Security savings this payroll never pays':
-            return ('What to do: switch Social Security off for this employee, in the census SocialSec column or '
-                    'in the proposal settings, and run the proposal again. This payroll deducts no Social Security, '
-                    'so no saving on it can be promised.')
-        if f.label == 'The payroll pays Social Security the proposal ignores':
-            return ('What to do: switch Social Security on for this employee in the census SocialSec column or the '
-                    'proposal settings, and run the proposal again. The payslips deduct it, so the premium saves it.')
-        if f.label == 'The employee fee in the proposal is not the fee payroll deducts':
-            return ('What to do: set the employee fee in the proposal\'s program settings to the fee payroll '
-                    'actually deducts, and run the proposal again. The two promises cannot agree until the fee is '
-                    'the same in both places.')
-        if f.label == 'A deduction sits in the wrong census column':
-            return ('What to do: move the retirement amount out of the Other pre-tax census column into the '
-                    '401-k/IRA column and run the proposal again. The Other column takes the amount out of Social '
-                    'Security and Medicare wages, which payroll does not do for retirement.')
-        if f.label == 'The proposal calculated on no income at all':
-            return ('What to do: the proposal worked this employee out on zero income. Check the salary on the '
-                    'census and the buffer in the proposal settings, then run the proposal again.')
-        if f.label == 'The premium on the payslip is not the premium in the proposal':
-            return ('What to do: make the premium on the payslip and the premium in the proposal the same, then '
-                    'run both again. Nothing computed from two different premiums can agree.')
-        if f.label == 'A misread figure was corrected from the census and the statement arithmetic':
-            return ('Nothing to correct on the census. One line on the scan was read wrongly; the audit used the '
-                    'figure the census and the statement arithmetic agree on, and says which line to check.')
+        return 'Nothing to do.'
     labels = {f.label for f in a.findings}
-    if 'The statement does not add up' in labels:
-        return ('What to do: look at this employee\'s two payslips. Their own figures do not add up, so nothing '
-                'can be concluded until someone checks them.')
-    if 'Something else changed between the two payslips' in labels:
-        return ('What to do: ask for a mock payslip that changes only the premium. Something else changed on this '
-                'one, so the two cannot be compared.')
-    if 'Payroll withholds a fixed federal amount' in labels:
-        return ('Nothing to correct on the census. Payroll withholds a fixed federal amount for this employee, so '
-                'the premium cannot produce a federal saving. The proposal should not promise one.')
-    if 'The proposal report is out of date for this employee' in labels:
-        return ('What to do: run the proposal again on the current engine, with Social Security set to N where '
-                'the payslips deduct none, and reconcile against that report. The report is out of date, the data '
-                'entered is not the fault.')
-    if 'State withholding' in labels:
-        return ('Nothing to correct on the census. The difference comes from how each system works out state '
-                'withholding, not from the data entered.')
     if 'No cause could be established' in labels:
-        return 'The difference is recorded. The files provided do not show what caused it.'
-    return 'The difference is recorded.'
+        return 'The difference is recorded; the files do not show its cause.'
+    if a.verdict_class == 'red':
+        return "Not verified: check this employee's payslips."
+    return ''    # each cause above carries its own what-to-do
 
 
 def build(audits, summary, notes, client='', files=None, ai_paragraph='', period=''):

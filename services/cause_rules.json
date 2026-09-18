@@ -225,6 +225,125 @@
         }
        },
        {
+        "columnId": "in_pretax_known",
+        "type": "input",
+        "condition": {
+         "inputVariable": "pretax_known"
+        }
+       },
+       {
+        "columnId": "in_premium_pretax_gap_abs",
+        "type": "input",
+        "condition": {
+         "inputVariable": "premium_pretax_gap_abs"
+        }
+       },
+       {
+        "columnId": "in_medg_known",
+        "type": "input",
+        "condition": {
+         "inputVariable": "medg_known"
+        }
+       },
+       {
+        "columnId": "in_medg_gap_abs",
+        "type": "input",
+        "condition": {
+         "inputVariable": "medg_gap_abs"
+        }
+       },
+       {
+        "columnId": "in_reimb_missing_sig",
+        "type": "input",
+        "condition": {
+         "inputVariable": "reimb_missing_sig"
+        }
+       },
+       {
+        "columnId": "in_reimb_known",
+        "type": "input",
+        "condition": {
+         "inputVariable": "reimb_known"
+        }
+       },
+       {
+        "columnId": "in_reimb_gap_abs",
+        "type": "input",
+        "condition": {
+         "inputVariable": "reimb_gap_abs"
+        }
+       },
+       {
+        "columnId": "in_med_read",
+        "type": "input",
+        "condition": {
+         "inputVariable": "med_read"
+        }
+       },
+       {
+        "columnId": "in_med_on_slips",
+        "type": "input",
+        "condition": {
+         "inputVariable": "med_on_slips"
+        }
+       },
+       {
+        "columnId": "in_eng_med",
+        "type": "input",
+        "condition": {
+         "inputVariable": "eng_med"
+        }
+       },
+       {
+        "columnId": "in_eng_med_known",
+        "type": "input",
+        "condition": {
+         "inputVariable": "eng_med_known"
+        }
+       },
+       {
+        "columnId": "in_pay_med_sav",
+        "type": "input",
+        "condition": {
+         "inputVariable": "pay_med_sav"
+        }
+       },
+       {
+        "columnId": "in_med_mismatch",
+        "type": "input",
+        "condition": {
+         "inputVariable": "med_mismatch"
+        }
+       },
+       {
+        "columnId": "in_ret_change_abs",
+        "type": "input",
+        "condition": {
+         "inputVariable": "ret_change_abs"
+        }
+       },
+       {
+        "columnId": "in_report_int_known",
+        "type": "input",
+        "condition": {
+         "inputVariable": "report_int_known"
+        }
+       },
+       {
+        "columnId": "in_report_int_gap_abs",
+        "type": "input",
+        "condition": {
+         "inputVariable": "report_int_gap_abs"
+        }
+       },
+       {
+        "columnId": "in_census_found",
+        "type": "input",
+        "condition": {
+         "inputVariable": "census_found"
+        }
+       },
+       {
         "columnId": "out_label",
         "type": "output",
         "columnOutput": {
@@ -508,6 +627,47 @@
         ]
        },
        {
+        "name": "no census row matches this employee",
+        "active": true,
+        "cells": [
+         {
+          "column": "in_census_found",
+          "scalarCondition": {
+           "operator": "=",
+           "value": "N"
+          }
+         },
+         {
+          "column": "in_slips_present",
+          "scalarCondition": {
+           "operator": "=",
+           "value": "Y"
+          }
+         },
+         {
+          "column": "out_label",
+          "outputScalarValue": {
+           "type": "common",
+           "value": "No census row matches this employee"
+          }
+         },
+         {
+          "column": "out_amount",
+          "outputScalarValue": {
+           "type": "common",
+           "value": null
+          }
+         },
+         {
+          "column": "out_detail",
+          "outputScalarValue": {
+           "type": "common",
+           "value": "census_missing"
+          }
+         }
+        ]
+       },
+       {
         "name": "Social Security savings claimed on a payroll that never deducts it",
         "active": true,
         "cells": [
@@ -606,6 +766,130 @@
           "outputScalarValue": {
            "type": "common",
            "value": "ss_off"
+          }
+         }
+        ]
+       },
+       {
+        "name": "Medicare savings claimed on a payroll that never deducts it",
+        "active": true,
+        "cells": [
+         {
+          "column": "in_slips_present",
+          "scalarCondition": {
+           "operator": "=",
+           "value": "Y"
+          }
+         },
+         {
+          "column": "in_med_read",
+          "scalarCondition": {
+           "operator": "=",
+           "value": "Y"
+          }
+         },
+         {
+          "column": "in_med_on_slips",
+          "scalarCondition": {
+           "operator": "=",
+           "value": "N"
+          }
+         },
+         {
+          "column": "in_eng_med",
+          "scalarCondition": {
+           "operator": ">",
+           "value": 0.02
+          }
+         },
+         {
+          "column": "out_label",
+          "outputScalarValue": {
+           "type": "common",
+           "value": "The proposal counts Medicare savings this payroll never pays"
+          }
+         },
+         {
+          "column": "out_amount",
+          "outputScalarValue": {
+           "type": "function",
+           "value": "0 - {eng_med}"
+          }
+         },
+         {
+          "column": "out_detail",
+          "outputScalarValue": {
+           "type": "common",
+           "value": "med_on"
+          }
+         }
+        ]
+       },
+       {
+        "name": "payroll deducts Medicare the proposal ignores",
+        "active": true,
+        "cells": [
+         {
+          "column": "in_slips_present",
+          "scalarCondition": {
+           "operator": "=",
+           "value": "Y"
+          }
+         },
+         {
+          "column": "in_med_read",
+          "scalarCondition": {
+           "operator": "=",
+           "value": "Y"
+          }
+         },
+         {
+          "column": "in_med_on_slips",
+          "scalarCondition": {
+           "operator": "=",
+           "value": "Y"
+          }
+         },
+         {
+          "column": "in_eng_med_known",
+          "scalarCondition": {
+           "operator": "=",
+           "value": "Y"
+          }
+         },
+         {
+          "column": "in_eng_med",
+          "scalarCondition": {
+           "operator": "<=",
+           "value": 0.02
+          }
+         },
+         {
+          "column": "in_pay_med_sav",
+          "scalarCondition": {
+           "operator": ">",
+           "value": 0.02
+          }
+         },
+         {
+          "column": "out_label",
+          "outputScalarValue": {
+           "type": "common",
+           "value": "The payroll pays Medicare the proposal ignores"
+          }
+         },
+         {
+          "column": "out_amount",
+          "outputScalarValue": {
+           "type": "function",
+           "value": "{pay_med_sav}"
+          }
+         },
+         {
+          "column": "out_detail",
+          "outputScalarValue": {
+           "type": "common",
+           "value": "med_off"
           }
          }
         ]
@@ -736,6 +1020,204 @@
           "outputScalarValue": {
            "type": "common",
            "value": "premium_mismatch"
+          }
+         }
+        ]
+       },
+       {
+        "name": "the premium was not taken pre-tax in full",
+        "active": true,
+        "cells": [
+         {
+          "column": "in_pretax_known",
+          "scalarCondition": {
+           "operator": "=",
+           "value": "Y"
+          }
+         },
+         {
+          "column": "in_premium_pretax_gap_abs",
+          "scalarCondition": {
+           "operator": ">",
+           "value": 1.0
+          }
+         },
+         {
+          "column": "out_label",
+          "outputScalarValue": {
+           "type": "common",
+           "value": "The premium was not taken pre-tax in full"
+          }
+         },
+         {
+          "column": "out_amount",
+          "outputScalarValue": {
+           "type": "function",
+           "value": "{premium_pretax_gap}"
+          }
+         },
+         {
+          "column": "out_detail",
+          "outputScalarValue": {
+           "type": "common",
+           "value": "premium_not_pretax"
+          }
+         }
+        ]
+       },
+       {
+        "name": "the premium did not come out of Medicare wages in full",
+        "active": true,
+        "cells": [
+         {
+          "column": "in_medg_known",
+          "scalarCondition": {
+           "operator": "=",
+           "value": "Y"
+          }
+         },
+         {
+          "column": "in_medg_gap_abs",
+          "scalarCondition": {
+           "operator": ">",
+           "value": 1.0
+          }
+         },
+         {
+          "column": "out_label",
+          "outputScalarValue": {
+           "type": "common",
+           "value": "The premium did not come out of Medicare wages in full"
+          }
+         },
+         {
+          "column": "out_amount",
+          "outputScalarValue": {
+           "type": "function",
+           "value": "{medg_gap}"
+          }
+         },
+         {
+          "column": "out_detail",
+          "outputScalarValue": {
+           "type": "common",
+           "value": "premium_not_medicare"
+          }
+         }
+        ]
+       },
+       {
+        "name": "the premium is deducted but never reimbursed",
+        "active": true,
+        "cells": [
+         {
+          "column": "in_reimb_missing_sig",
+          "scalarCondition": {
+           "operator": "=",
+           "value": "Y"
+          }
+         },
+         {
+          "column": "out_label",
+          "outputScalarValue": {
+           "type": "common",
+           "value": "The premium is deducted but never reimbursed"
+          }
+         },
+         {
+          "column": "out_amount",
+          "outputScalarValue": {
+           "type": "function",
+           "value": "0 - {premium_m}"
+          }
+         },
+         {
+          "column": "out_detail",
+          "outputScalarValue": {
+           "type": "common",
+           "value": "reimb_missing"
+          }
+         }
+        ]
+       },
+       {
+        "name": "the reimbursement does not return the whole premium",
+        "active": true,
+        "cells": [
+         {
+          "column": "in_reimb_known",
+          "scalarCondition": {
+           "operator": "=",
+           "value": "Y"
+          }
+         },
+         {
+          "column": "in_premium_known",
+          "scalarCondition": {
+           "operator": "=",
+           "value": "Y"
+          }
+         },
+         {
+          "column": "in_reimb_gap_abs",
+          "scalarCondition": {
+           "operator": ">",
+           "value": 1.0
+          }
+         },
+         {
+          "column": "out_label",
+          "outputScalarValue": {
+           "type": "common",
+           "value": "The reimbursement does not return the whole premium"
+          }
+         },
+         {
+          "column": "out_amount",
+          "outputScalarValue": {
+           "type": "function",
+           "value": "{reimb_gap}"
+          }
+         },
+         {
+          "column": "out_detail",
+          "outputScalarValue": {
+           "type": "common",
+           "value": "reimb_partial"
+          }
+         }
+        ]
+       },
+       {
+        "name": "the retirement deduction changed with the premium",
+        "active": true,
+        "cells": [
+         {
+          "column": "in_ret_change_abs",
+          "scalarCondition": {
+           "operator": ">",
+           "value": 1.0
+          }
+         },
+         {
+          "column": "out_label",
+          "outputScalarValue": {
+           "type": "common",
+           "value": "The retirement deduction changed with the premium"
+          }
+         },
+         {
+          "column": "out_amount",
+          "outputScalarValue": {
+           "type": "function",
+           "value": "{ret_change}"
+          }
+         },
+         {
+          "column": "out_detail",
+          "outputScalarValue": {
+           "type": "common",
+           "value": "ret_changed"
           }
          }
         ]
@@ -973,6 +1455,47 @@
         ]
        },
        {
+        "name": "the proposal report does not add up internally",
+        "active": true,
+        "cells": [
+         {
+          "column": "in_report_int_known",
+          "scalarCondition": {
+           "operator": "=",
+           "value": "Y"
+          }
+         },
+         {
+          "column": "in_report_int_gap_abs",
+          "scalarCondition": {
+           "operator": ">",
+           "value": 0.02
+          }
+         },
+         {
+          "column": "out_label",
+          "outputScalarValue": {
+           "type": "common",
+           "value": "The proposal report does not add up internally"
+          }
+         },
+         {
+          "column": "out_amount",
+          "outputScalarValue": {
+           "type": "function",
+           "value": "{report_int_gap}"
+          }
+         },
+         {
+          "column": "out_detail",
+          "outputScalarValue": {
+           "type": "common",
+           "value": "report_internal"
+          }
+         }
+        ]
+       },
+       {
         "name": "the proposal report is out of date",
         "active": true,
         "cells": [
@@ -1114,6 +1637,13 @@
           }
          },
          {
+          "column": "in_med_mismatch",
+          "scalarCondition": {
+           "operator": "=",
+           "value": "N"
+          }
+         },
+         {
           "column": "out_label",
           "outputScalarValue": {
            "type": "common",
@@ -1141,27 +1671,36 @@
     }
    ],
    "details": {
-    "ret_named_exact": "The payslip takes {ret_missing} a month off this employee's pay before federal tax is worked out, and the census does not show it. The proposal therefore calculated tax on more income than payroll actually taxes. The payslip shows it as a retirement deduction of {ret_named} a month. This is about federal tax only: Social Security and Medicare are unaffected, as the payslip itself shows. Enter the amount in the 401-k/IRA column of the census, not the Other pre-tax column, and run the proposal again on the current engine: this cause then disappears and the promise lands on the payslip.",
-    "ret_named_plus": "The payslip takes {ret_missing} a month off this employee's pay before federal tax is worked out, and the census does not show it. The proposal therefore calculated tax on more income than payroll actually taxes. The payslip shows {ret_named} of it as a retirement deduction. The other {ret_unnamed} a month is another deduction taken before federal tax, which the payslip does not name. Both are missing from the census. This is about federal tax only: Social Security and Medicare are unaffected, as the payslip itself shows. Enter the amount in the 401-k/IRA column of the census, not the Other pre-tax column, and run the proposal again on the current engine: this cause then disappears and the promise lands on the payslip.",
-    "ret_unnamed": "The payslip takes this amount off the pay each month before federal tax is worked out, and the census does not show it, so the proposal calculated tax on more income than payroll taxes. The payslip does not say what the deduction is for, so it is reported as it stands rather than guessed at. Enter the amount in the 401-k/IRA column of the census, not the Other pre-tax column, and run the proposal again on the current engine: this cause then disappears and the promise lands on the payslip.",
-    "pretax_missing": "The income the proposal started from is higher than the income on the payslip by this amount, which means a deduction taken before tax on the payslip is not in the census.",
-    "wrong_column": "The proposal starts from {ti_gap_abs} a month less income than the payslip shows, and the census carries a pre-tax amount of at least that size in the Other pre-tax column. That column reduces the income Social Security and Medicare are worked on, but payroll leaves a retirement deduction inside those wages. A retirement amount belongs in the 401-k/IRA census column, where it reduces federal tax only.",
-    "ti_neg": "The income the proposal started from is lower than the income on the payslip by this amount. A deduction is in the census that payroll does not actually take before tax, or a census figure is too low.",
-    "ss_on": "The proposal credits {eng_ss} a month of Social Security savings, but neither payslip shows a Social Security deduction at all: this payroll does not pay into Social Security, as school district TRS members commonly do not. A saving on a tax nobody pays inflates the promised allotment by {eng_ss} a month. Social Security should be switched off for this employee, in the census SocialSec column or in the proposal settings.",
-    "ss_off": "The payslips deduct Social Security, but the proposal claims no Social Security saving for this employee. The premium reduces Social Security wages, so payroll actually saves {pay_ss_sav} a month that the proposal leaves out of the promise.",
-    "fee_mismatch": "The proposal worked the allotment out with an employee fee of {fee_eng} a month, but payroll actually deducts {fee_pay}. Every dollar of difference lands straight in the allotment: the promise and the payslip cannot agree until the two fees are the same. Check the program settings fee against the client's contracted fee.",
-    "salary_zero": "The proposal's taxable income for this employee is zero while the census carries real pay. The proposal calculated on no income, promised on no income, and nothing it says about this employee can be right. This is the buffer or salary field going to zero on the way into the calculation, not a payroll fault.",
-    "premium_mismatch": "The pre-tax premium on the payslip is not the premium the proposal used, so every saving the proposal worked out sits on a different base. The amount shown is the monthly difference between the two premiums.",
-    "fixed_fed": "Payroll takes the same federal tax before and after the premium, so this employee gets no federal tax saving from it at all. The amount shown is the federal tax being withheld each month regardless.",
-    "fed_zero": "Federal tax falls to nothing once the premium is deducted. The employee gets back all the federal tax there was, and no more, so the saving cannot reach the amount the proposal promised.",
-    "w4_diff": "Payroll and the census hold different W-4 details: {w4_text}. Tax worked out from different W-4 details will not agree.",
-    "gross_moved": "Gross pay is not the same on the two payslips, so something changed besides the premium and the two are not comparable. Ask for a mock payslip that changes only the premium. This check looks at gross pay only, so other changes may still be present.",
-    "identity_fee_stmt": "The figures on the two payslips do not add up: the tax saved, less the employee fee, does not come to the change in take home pay. This tool will not guess which line is wrong, so this employee is marked as not verified. Someone should look at the two payslips.",
-    "identity_fee_prop": "The figures on the two payslips do not add up: the tax saved, less the employee fee, does not come to the change in take home pay, and the employee fee was taken from the proposal because the statement prints no after-tax fee line. This tool will not guess which line is wrong, so this employee is marked as not verified. Someone should look at the two payslips.",
-    "tables": "The federal saving on this proposal report does not match what payroll actually withheld. The report is out of date. Run the proposal again on the current engine, with the retirement deduction in the 401-k/IRA column of the census and Social Security set to N for a payroll that deducts none, then reconcile against the new report: this cause then disappears where the census is complete.",
-    "state_mo": "Missouri rounds state tax to whole dollars on each payslip while the proposal works to the cent, so a small difference every pay period is expected.",
-    "state_generic": "State tax on the payslip differs from what the proposal worked out by this amount.",
-    "fica": "Social Security and Medicare on the payslips differ from the proposal by this amount. Before treating it as a fault, check whether this employee pays into Social Security at all, and allow for payroll rounding each pay period."
+    "ret_named_exact": "Payroll takes {ret_missing} a month pre-tax for retirement; the census does not carry it, so the proposal taxed income payroll does not tax. Put it in the census 401-k/IRA column and rerun the proposal.",
+    "ret_named_plus": "Payroll reduces federal wages by {ret_missing} a month; the payslip names {ret_named} as retirement and does not name the other {ret_unnamed}. None of it is in the census. Put it in the census 401-k/IRA column and rerun the proposal.",
+    "ret_unnamed": "Payroll reduces federal wages by this amount pre-tax; the census does not carry it and the payslip does not name it. Put it in the census 401-k/IRA column and rerun the proposal.",
+    "pretax_missing": "The proposal starts from more income than the payslip taxes: a pre-tax deduction is missing from the census. Add it and rerun the proposal.",
+    "wrong_column": "The proposal starts {ti_gap_abs} a month low: a retirement amount sits in the Other pre-tax column, which also cuts Social Security and Medicare wages. Move it to the 401-k/IRA column and rerun the proposal.",
+    "ti_neg": "The proposal starts from less income than the payslip shows: a census pre-tax figure is too high or misplaced. Check fields Q and R against the payslip.",
+    "census_missing": "No census row matches this employee. Add them to the census and rerun the proposal.",
+    "ss_on": "The proposal counts {eng_ss} a month of Social Security savings; the payslips deduct none. Set SocialSec to N and rerun the proposal.",
+    "ss_off": "The payslips deduct Social Security; the proposal counts no saving on it, leaving {pay_ss_sav} a month out of the promise. Set SocialSec to Y and rerun the proposal.",
+    "med_on": "The proposal counts {eng_med} a month of Medicare savings; the payslips deduct none. Set Medicare to N and rerun the proposal.",
+    "med_off": "The payslips deduct Medicare; the proposal counts no saving on it, leaving {pay_med_sav} a month out of the promise. Set Medicare to Y and rerun the proposal.",
+    "fee_mismatch": "The proposal used a {fee_eng} fee; payroll deducts {fee_pay}. The difference lands in the allotment. Set the proposal fee to the payroll fee and rerun.",
+    "salary_zero": "The proposal calculated this employee on zero income while the census carries pay. Check the census salary and the buffer setting, then rerun the proposal.",
+    "premium_mismatch": "The payslip premium is not the proposal premium, so every saving sits on the wrong base. Align the premiums and rerun both.",
+    "premium_not_pretax": "{premium_pretax_gap} a month of the premium stayed inside federal taxable wages. Payroll setup: take the whole premium pre-tax.",
+    "premium_not_medicare": "{medg_gap} a month of the premium stayed inside Medicare wages. Payroll setup: take the whole premium out of Medicare wages.",
+    "reimb_missing": "The premium is deducted and never reimbursed, so the employee is paying it. Payroll setup: add the reimbursement line.",
+    "reimb_partial": "The reimbursement does not equal the premium; the difference hits take home pay every month. Align them in payroll.",
+    "ret_changed": "The retirement deduction moved between the payslips, so the premium's effect is mixed with a retirement recalculation. Ask for a mock that changes only the premium.",
+    "fixed_fed": "Payroll withholds the same federal tax before and after, so the premium produces no federal saving for this employee.",
+    "fed_zero": "Only {fed_before_m} a month of federal tax existed and the premium wipes it out; the real savings are less than the proposal assumed, and when they are less than the fee, take home falls.",
+    "w4_diff": "Payroll and the census hold different W-4 details: {w4_text}. Align them and rerun the proposal.",
+    "gross_moved": "Gross pay differs between the two payslips, so more than the premium changed. Ask for a mock that changes only the premium.",
+    "identity_fee_stmt": "The payslip figures do not add up: tax saved less the fee does not equal the take home change. Not verified; check the payslips.",
+    "identity_fee_prop": "The payslip figures do not add up: tax saved less the fee does not equal the take home change (fee taken from the proposal; the statement prints none). Not verified; check the payslips.",
+    "report_internal": "The report's own arithmetic fails: gross savings less fee does not equal the allotment. Regenerate the report.",
+    "tables": "The federal saving on this report does not match payroll: the report is out of date. Rerun the proposal on the current engine and reconcile against the new report.",
+    "state_mo": "Missouri rounds state tax to whole dollars each pay; small differences are expected.",
+    "state_generic": "State tax differs by this amount. Check the state W-4 details on the census.",
+    "fica": "Social Security and Medicare differ from the proposal by this amount. Check participation and payroll rounding."
    }
   }
  }
