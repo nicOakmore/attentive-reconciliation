@@ -330,12 +330,13 @@ def _resolution(a):
     if 'Payroll withholds a fixed federal amount' in labels:
         return ('Nothing to correct on the census. Payroll withholds a fixed federal amount for this employee, so '
                 'the premium cannot produce a federal saving. The proposal should not promise one.')
-    if 'The proposal report predates the current federal tax table' in labels:
-        return ('What to do: run the proposal again on the current engine and reconcile against that report. The '
-                'difference comes from the outdated table the report was produced on, not from the data entered.')
+    if 'The proposal report is out of date for this employee' in labels:
+        return ('What to do: run the proposal again on the current engine, with Social Security set to N where '
+                'the payslips deduct none, and reconcile against that report. The report is out of date, the data '
+                'entered is not the fault.')
     if 'State withholding' in labels:
-        return ('Nothing to correct on the census. The difference comes from the state tax tables each system '
-                'holds, not from the data entered.')
+        return ('Nothing to correct on the census. The difference comes from how each system works out state '
+                'withholding, not from the data entered.')
     if 'No cause could be established' in labels:
         return 'The difference is recorded. The files provided do not show what caused it.'
     return 'The difference is recorded.'

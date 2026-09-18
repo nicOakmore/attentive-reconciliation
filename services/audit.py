@@ -240,10 +240,13 @@ def audit_employee(emp: EmployeeAudit) -> EmployeeAudit:
             emp.ss_note = 'Social Security: the payslips deduct it and the proposal counts a saving on it. Consistent.'
         elif not on_slips and not claimed:
             emp.ss_note = ('Social Security: the payslips deduct none and the proposal promises no saving on it. '
-                           'Consistent with a TRS payroll outside Social Security.')
+                           'Consistent with a TRS payroll outside Social Security. Whenever the proposal is run '
+                           'for this employee, Social Security must be set to N, in the census SocialSec column '
+                           'or the proposal settings.')
         elif claimed:
-            emp.ss_note = ('Social Security: the proposal counts a saving on it but the payslips deduct none. See '
-                           'the cause above: it should be switched off for this employee.')
+            emp.ss_note = ('Social Security: the proposal counts a saving on it but the payslips deduct none. '
+                           'Social Security must be set to N for this employee, in the census SocialSec column or '
+                           'the proposal settings, and the proposal run again.')
         else:
             emp.ss_note = ('Social Security: the payslips deduct it but the proposal claims no saving on it. See '
                            'the cause above.')

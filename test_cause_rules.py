@@ -115,12 +115,12 @@ e.engine.allotment = 80.00
 ls = labels(e)
 check('w4 still fires', 'The W-4 on payroll differs from the census' in ls, str(ls))
 
-# 11. tax tables
+# 11. federal figures do not match: the report is out of date
 e = base()
 e.after.federal = 389.00               # payroll saves 160.35 where the engine's table says 170.77
 e.after.net_pay = 4563.36
 ls = labels(e)
-check('tables still fires', 'The proposal report predates the current federal tax table' in ls, str(ls))
+check('outdated report fires', 'The proposal report is out of date for this employee' in ls, str(ls))
 
 # 12. no payslip at all
 e = base()

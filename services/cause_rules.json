@@ -973,7 +973,7 @@
         ]
        },
        {
-        "name": "different federal tax tables",
+        "name": "the proposal report is out of date",
         "active": true,
         "cells": [
          {
@@ -994,7 +994,7 @@
           "column": "out_label",
           "outputScalarValue": {
            "type": "common",
-           "value": "The proposal report predates the current federal tax table"
+           "value": "The proposal report is out of date for this employee"
           }
          },
          {
@@ -1158,7 +1158,7 @@
     "gross_moved": "Gross pay is not the same on the two payslips, so something changed besides the premium and the two are not comparable. Ask for a mock payslip that changes only the premium. This check looks at gross pay only, so other changes may still be present.",
     "identity_fee_stmt": "The figures on the two payslips do not add up: the tax saved, less the employee fee, does not come to the change in take home pay. This tool will not guess which line is wrong, so this employee is marked as not verified. Someone should look at the two payslips.",
     "identity_fee_prop": "The figures on the two payslips do not add up: the tax saved, less the employee fee, does not come to the change in take home pay, and the employee fee was taken from the proposal because the statement prints no after-tax fee line. This tool will not guess which line is wrong, so this employee is marked as not verified. Someone should look at the two payslips.",
-    "tables": "Federal tax on this proposal report does not match what payroll withheld, because the report was produced on an older federal tax table. The current engine carries the current-year table and matches payroll where the census is complete, so this is a difference between an outdated report and payroll, not between two live systems. Run the proposal again on the current engine and reconcile against that report: this cause then disappears.",
+    "tables": "The federal saving on this proposal report does not match what payroll actually withheld. The report is out of date. Run the proposal again on the current engine, with the retirement deduction in the 401-k/IRA column of the census and Social Security set to N for a payroll that deducts none, then reconcile against the new report: this cause then disappears where the census is complete.",
     "state_mo": "Missouri rounds state tax to whole dollars on each payslip while the proposal works to the cent, so a small difference every pay period is expected.",
     "state_generic": "State tax on the payslip differs from what the proposal worked out by this amount.",
     "fica": "Social Security and Medicare on the payslips differ from the proposal by this amount. Before treating it as a fault, check whether this employee pays into Social Security at all, and allow for payroll rounding each pay period."
