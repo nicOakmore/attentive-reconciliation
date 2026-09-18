@@ -128,7 +128,7 @@ e = base()
 e.after.federal = 389.00               # payroll saves 160.35 where the engine's table says 170.77
 e.after.net_pay = 4563.36
 ls = labels(e)
-check('outdated report fires', 'The proposal report is out of date for this employee' in ls, str(ls))
+check('federal mismatch fires', "The proposal's federal saving does not match payroll" in ls, str(ls))
 
 # 12. no payslip at all
 e = base()

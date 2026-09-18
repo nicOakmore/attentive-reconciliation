@@ -88,6 +88,8 @@ class Census:
     additional_state: Optional[float] = None
     state: str = ''
     found: bool = True          # a census row actually matched this employee
+    socialsec: str = ''         # census SocialSec column, Y or N
+    medicare: str = ''          # census Medicare column, Y or N
 
 
 @dataclass
@@ -401,6 +403,25 @@ def _evidence(emp: EmployeeAudit) -> dict:
                   if b.retirement is not None and a.retirement is not None else None)
     report_int_known = (e.gross_savings is not None and e.fee is not None and e.allotment is not None)
     report_int_gap = r2(e.gross_savings - e.fee - e.allotment) if report_int_known else None
+    # The rerun instruction, composed from what this employee's own data says needs changing. Named fields only:
+    # a reader must be able to act on it without reading the rest of the block.
+    fixes = []
+    if (ret_missing or 0) > CENT:
+        fixes.append(f'retirement {_m(ret_missing)} in the 401-k/IRA column')
+    if slips_present and not ss_on_slips and (c.socialsec or '') != 'N':
+        fixes.append('SocialSec set to N')
+    if slips_present and ss_on_slips and (c.socialsec or '') == 'N':
+        fixes.append('SocialSec set to Y')
+    if slips_present and med_read and not med_on_slips and (c.medicare or '') != 'N':
+        fixes.append('Medicare set to N')
+    if fee_known and abs(fee_gap or 0) > CENT:
+        fixes.append(f'the employee fee at {_m(fee_pay)}')
+    if premium_known and abs(premium_gap or 0) > CENT:
+        fixes.append(f'the premium at {_m(slip_prem)}')
+    if fixes:
+        rerun_fix = 'Correct the census for this employee (' + ', '.join(fixes) + ') and rerun the proposal.'
+    else:
+        rerun_fix = 'Check this employee\'s census row against the payslip and rerun the proposal.'
     gross_moved = (per_month(a.gross - b.gross, pp)
                    if b.gross is not None and a.gross is not None else None)
     identity_broken = emp.identity_gap is not None and abs(emp.identity_gap) > 2.0
@@ -469,6 +490,9 @@ def _evidence(emp: EmployeeAudit) -> dict:
         report_int_known=yn(report_int_known), report_int_gap=report_int_gap,
         report_int_gap_abs=abs(report_int_gap) if report_int_gap is not None else None,
         census_found=yn(getattr(c, 'found', True)),
+        census_ss=(c.socialsec or ''), census_med=(c.medicare or ''),
+        eng_fed_sav=e.federal_savings, pay_fed_sav=emp.payroll_federal_savings,
+        rerun_fix=rerun_fix,
     )
 
 

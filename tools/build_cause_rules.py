@@ -22,7 +22,7 @@ IN = ['ret_named_known', 'ret_missing_abs', 'ret_unnamed_abs', 'ret_zero', 'ti_g
       'pretax_known', 'premium_pretax_gap_abs', 'medg_known', 'medg_gap_abs', 'reimb_missing_sig',
       'reimb_known', 'reimb_gap_abs', 'med_read', 'med_on_slips', 'eng_med', 'eng_med_known',
       'pay_med_sav', 'med_mismatch', 'ret_change_abs', 'report_int_known', 'report_int_gap_abs',
-      'census_found']
+      'census_found', 'census_ss', 'census_med']
 OUTS = ['label', 'amount', 'detail']
 
 Y = {"operator": "=", "value": "Y"}
@@ -80,6 +80,16 @@ ROWS = [
     row("Social Security savings claimed on a payroll that never deducts it",
         {"slips_present": Y, "ss_on_slips": N, "eng_ss": gt(0.02)},
         "The proposal counts Social Security savings this payroll never pays", "0 - {eng_ss}", "ss_on"),
+    row("census SocialSec is not N on a payroll that deducts none",
+        {"slips_present": Y, "ss_on_slips": N, "census_ss": {"operator": "!=", "value": "N"}, "eng_ss": lte(0.02)},
+        "The census does not have Social Security set to N", None, "census_ss_not_n"),
+    row("census SocialSec is N on a payroll that deducts it",
+        {"slips_present": Y, "ss_on_slips": Y, "census_ss": {"operator": "=", "value": "N"}},
+        "The census has Social Security set to N but payroll deducts it", None, "census_ss_not_y"),
+    row("census Medicare is not N on a payroll that deducts none",
+        {"slips_present": Y, "med_read": Y, "med_on_slips": N, "census_med": {"operator": "!=", "value": "N"},
+         "eng_med": lte(0.02)},
+        "The census does not have Medicare set to N", None, "census_med_not_n"),
     row("payroll deducts Social Security the proposal ignores",
         {"slips_present": Y, "ss_on_slips": Y, "eng_ss_known": Y, "eng_ss": lte(0.02)},
         "The payroll pays Social Security the proposal ignores", "{pay_ss_sav}", "ss_off"),
@@ -138,9 +148,9 @@ ROWS = [
     row("the proposal report does not add up internally",
         {"report_int_known": Y, "report_int_gap_abs": gt(0.02)},
         "The proposal report does not add up internally", "{report_int_gap}", "report_internal"),
-    row("the proposal report is out of date",
+    row("the proposal's federal saving does not match payroll",
         {"fed_in_doubt": N, "federal_gap_abs": gt(0.02)},
-        "The proposal report is out of date for this employee", "{federal_gap}", "tables"),
+        "The proposal's federal saving does not match payroll", "{federal_gap}", "fed_mismatch"),
     # ---- residual component differences -------------------------------------------------
     row("state withholding, Missouri whole-dollar rounding",
         {"state_gap_abs": gt(0.02), "state_is_mo": Y},
@@ -180,7 +190,10 @@ DETAILS = {
     "identity_fee_stmt": "The payslip figures do not add up: tax saved less the fee does not equal the take home change. Not verified; check the payslips.",
     "identity_fee_prop": "The payslip figures do not add up: tax saved less the fee does not equal the take home change (fee taken from the proposal; the statement prints none). Not verified; check the payslips.",
     "report_internal": "The report's own arithmetic fails: gross savings less fee does not equal the allotment. Regenerate the report.",
-    "tables": "The federal saving on this report does not match payroll: the report is out of date. Rerun the proposal on the current engine and reconcile against the new report.",
+    "fed_mismatch": "The report promises {eng_fed_sav} a month of federal saving; payroll saved {pay_fed_sav}. {rerun_fix}",
+    "census_ss_not_n": "Neither payslip deducts Social Security, so no saving on it can be promised for this employee. Set the census SocialSec column to N and rerun the proposal.",
+    "census_ss_not_y": "The payslips deduct Social Security and the census says N, so the promise leaves the Social Security saving out. Set the census SocialSec column to Y and rerun the proposal.",
+    "census_med_not_n": "Neither payslip deducts Medicare. Set the census Medicare column to N and rerun the proposal.",
     "state_mo": "Missouri rounds state tax to whole dollars each pay; small differences are expected.",
     "state_generic": "State tax differs by this amount. Check the state W-4 details on the census.",
     "fica": "Social Security and Medicare differ from the proposal by this amount. Check participation and payroll rounding.",
@@ -195,9 +208,19 @@ def main():
     unused = set(DETAILS) - refs
     if missing or unused:
         raise SystemExit(f'detail templates out of sync: missing {missing}, unused {unused}')
+    # Wording bans, enforced at build time so no future edit can reintroduce them.
+    banned = ('tax table', 'predates', 'out of date', 'outdated', 'current engine', 'the engine')
     for k, v in DETAILS.items():
-        if 'tax table' in v.lower() or 'predates' in v.lower():
-            raise SystemExit(f'forbidden wording in {k}')
+        for b in banned:
+            if b in v.lower():
+                raise SystemExit(f'forbidden wording "{b}" in detail {k}')
+    for r in ROWS:
+        for c in r['cells']:
+            if c.get('column') == 'out_label':
+                lab = (c['outputScalarValue']['value'] or '').lower()
+                for b in banned:
+                    if b in lab:
+                        raise SystemExit(f'forbidden wording "{b}" in label of {r["name"]}')
     doc = {"export": {"data": {"rules": [{"ruleAlias": "causeAttribution", "type": "decision-table",
                                           "decisionTable": {"columns": columns, "rows": ROWS}}],
                                "details": DETAILS}}}

@@ -344,6 +344,20 @@
         }
        },
        {
+        "columnId": "in_census_ss",
+        "type": "input",
+        "condition": {
+         "inputVariable": "census_ss"
+        }
+       },
+       {
+        "columnId": "in_census_med",
+        "type": "input",
+        "condition": {
+         "inputVariable": "census_med"
+        }
+       },
+       {
         "columnId": "out_label",
         "type": "output",
         "columnOutput": {
@@ -711,6 +725,171 @@
           "outputScalarValue": {
            "type": "common",
            "value": "ss_on"
+          }
+         }
+        ]
+       },
+       {
+        "name": "census SocialSec is not N on a payroll that deducts none",
+        "active": true,
+        "cells": [
+         {
+          "column": "in_slips_present",
+          "scalarCondition": {
+           "operator": "=",
+           "value": "Y"
+          }
+         },
+         {
+          "column": "in_ss_on_slips",
+          "scalarCondition": {
+           "operator": "=",
+           "value": "N"
+          }
+         },
+         {
+          "column": "in_census_ss",
+          "scalarCondition": {
+           "operator": "!=",
+           "value": "N"
+          }
+         },
+         {
+          "column": "in_eng_ss",
+          "scalarCondition": {
+           "operator": "<=",
+           "value": 0.02
+          }
+         },
+         {
+          "column": "out_label",
+          "outputScalarValue": {
+           "type": "common",
+           "value": "The census does not have Social Security set to N"
+          }
+         },
+         {
+          "column": "out_amount",
+          "outputScalarValue": {
+           "type": "common",
+           "value": null
+          }
+         },
+         {
+          "column": "out_detail",
+          "outputScalarValue": {
+           "type": "common",
+           "value": "census_ss_not_n"
+          }
+         }
+        ]
+       },
+       {
+        "name": "census SocialSec is N on a payroll that deducts it",
+        "active": true,
+        "cells": [
+         {
+          "column": "in_slips_present",
+          "scalarCondition": {
+           "operator": "=",
+           "value": "Y"
+          }
+         },
+         {
+          "column": "in_ss_on_slips",
+          "scalarCondition": {
+           "operator": "=",
+           "value": "Y"
+          }
+         },
+         {
+          "column": "in_census_ss",
+          "scalarCondition": {
+           "operator": "=",
+           "value": "N"
+          }
+         },
+         {
+          "column": "out_label",
+          "outputScalarValue": {
+           "type": "common",
+           "value": "The census has Social Security set to N but payroll deducts it"
+          }
+         },
+         {
+          "column": "out_amount",
+          "outputScalarValue": {
+           "type": "common",
+           "value": null
+          }
+         },
+         {
+          "column": "out_detail",
+          "outputScalarValue": {
+           "type": "common",
+           "value": "census_ss_not_y"
+          }
+         }
+        ]
+       },
+       {
+        "name": "census Medicare is not N on a payroll that deducts none",
+        "active": true,
+        "cells": [
+         {
+          "column": "in_slips_present",
+          "scalarCondition": {
+           "operator": "=",
+           "value": "Y"
+          }
+         },
+         {
+          "column": "in_med_read",
+          "scalarCondition": {
+           "operator": "=",
+           "value": "Y"
+          }
+         },
+         {
+          "column": "in_med_on_slips",
+          "scalarCondition": {
+           "operator": "=",
+           "value": "N"
+          }
+         },
+         {
+          "column": "in_census_med",
+          "scalarCondition": {
+           "operator": "!=",
+           "value": "N"
+          }
+         },
+         {
+          "column": "in_eng_med",
+          "scalarCondition": {
+           "operator": "<=",
+           "value": 0.02
+          }
+         },
+         {
+          "column": "out_label",
+          "outputScalarValue": {
+           "type": "common",
+           "value": "The census does not have Medicare set to N"
+          }
+         },
+         {
+          "column": "out_amount",
+          "outputScalarValue": {
+           "type": "common",
+           "value": null
+          }
+         },
+         {
+          "column": "out_detail",
+          "outputScalarValue": {
+           "type": "common",
+           "value": "census_med_not_n"
           }
          }
         ]
@@ -1496,7 +1675,7 @@
         ]
        },
        {
-        "name": "the proposal report is out of date",
+        "name": "the proposal's federal saving does not match payroll",
         "active": true,
         "cells": [
          {
@@ -1517,7 +1696,7 @@
           "column": "out_label",
           "outputScalarValue": {
            "type": "common",
-           "value": "The proposal report is out of date for this employee"
+           "value": "The proposal's federal saving does not match payroll"
           }
          },
          {
@@ -1531,7 +1710,7 @@
           "column": "out_detail",
           "outputScalarValue": {
            "type": "common",
-           "value": "tables"
+           "value": "fed_mismatch"
           }
          }
         ]
@@ -1697,7 +1876,10 @@
     "identity_fee_stmt": "The payslip figures do not add up: tax saved less the fee does not equal the take home change. Not verified; check the payslips.",
     "identity_fee_prop": "The payslip figures do not add up: tax saved less the fee does not equal the take home change (fee taken from the proposal; the statement prints none). Not verified; check the payslips.",
     "report_internal": "The report's own arithmetic fails: gross savings less fee does not equal the allotment. Regenerate the report.",
-    "tables": "The federal saving on this report does not match payroll: the report is out of date. Rerun the proposal on the current engine and reconcile against the new report.",
+    "fed_mismatch": "The report promises {eng_fed_sav} a month of federal saving; payroll saved {pay_fed_sav}. {rerun_fix}",
+    "census_ss_not_n": "Neither payslip deducts Social Security, so no saving on it can be promised for this employee. Set the census SocialSec column to N and rerun the proposal.",
+    "census_ss_not_y": "The payslips deduct Social Security and the census says N, so the promise leaves the Social Security saving out. Set the census SocialSec column to Y and rerun the proposal.",
+    "census_med_not_n": "Neither payslip deducts Medicare. Set the census Medicare column to N and rerun the proposal.",
     "state_mo": "Missouri rounds state tax to whole dollars each pay; small differences are expected.",
     "state_generic": "State tax differs by this amount. Check the state W-4 details on the census.",
     "fica": "Social Security and Medicare differ from the proposal by this amount. Check participation and payroll rounding."

@@ -37,7 +37,7 @@ def name_key(first, last):
 CENSUS_WANTED = ['employee_first_name', 'employee_last_name', 'employee_id', 'state', 'gross_annual_taxable_wages',
                  'pay_frequency', 'federal_w4_marital_status', 'w4_year', 'dependents', 'step2c', 'step3',
                  'group_health_monthly', 'other_monthly_pretax', 'retirement_401k_monthly', 'additional_federal',
-                 'additional_state']
+                 'additional_state', 'census_socialsec', 'census_medicare']
 REPORT_WANTED = ['first_name', 'last_name', 'client_employee_id', 'annual_salary', 'federal_tax_before_premium',
                  'federal_savings', 'state_savings', 'social_security_savings', 'medicare_savings',
                  'ee_gross_monthly_savings', 'ee_monthly_fee', 'employee_monthly_allotment', 'taxable_income_before',
@@ -116,6 +116,8 @@ SYN = {
  'other_monthly_pretax': ['other monthly pre taxed deduction amounts', 'other monthly pre taxed deduction'],
  'retirement_401k_monthly': ['401 k ira monthly amount', '401k ira monthly amount'],
  'additional_federal': ['additional federal'], 'additional_state': ['additional state'],
+ 'census_socialsec': ['socialsec', 'social sec', 'social security'],
+ 'census_medicare': ['medicare'],
  'federal_tax_before_premium': ['federal tax before premium'], 'federal_savings': ['federal savings'],
  'state_savings': ['state savings'], 'social_security_savings': ['social security savings'],
  'medicare_savings': ['medicare savings'], 'ee_gross_monthly_savings': ['ee gross monthly savings'],
