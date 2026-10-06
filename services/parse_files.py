@@ -149,6 +149,13 @@ LINE_PATTERNS = {
  'state': [r'^state (income )?tax', r'\bmo\b', r'\bco\b', r'state w/?h'],
  'social_security': [r'fica tax', r'social security', r'^soc$', r'\bsoc\b', r'oasdi'],
  'medicare': [r'medicare tax', r'^med$', r'\bmed\b'],
+ # Municipal income tax. Ohio, Pennsylvania, Kentucky, Michigan, Missouri, Maryland, Indiana and
+ # New York City all levy one on the same wages, a pre-tax premium reduces it, and the proposal
+ # engine has no column for it. Found at The Breathing Association, where it is 2.5% in Columbus
+ # and a second authority applies to some employees. Paylocity prints it as OH-COL1, OH-COL7,
+ # OH-REY2 and similar, with the municipality named alongside.
+ 'local': [r'^oh-\w+', r'^[a-z]{2}-[a-z]{3,4}\d?$', r'\blocal (income )?tax\b', r'\bcity tax\b',
+           r'\bmunicipal', r'columbus,?\s*oh', r'\bsitw\b.*city', r'\bres\b.*\btax\b'],
  'taxable_wages': [r'taxable wages'],
  'medicare_gross': [r'medicare gross'],
  'fica_gross': [r'fica gross'],
@@ -156,6 +163,7 @@ LINE_PATTERNS = {
  'retirement': [r'trs salary red', r'403\(?b\)?', r'457', r'retirement'],
  'premium': [r'pcm pretax', r'pcmpt', r'pcmp pre tax', r'premium'],
  'reimbursement': [r'simrp'],
+ 'local_gross': [r'local (taxable )?gross', r'city (taxable )?gross'],
  'fee': [r'pcm aftertax', r'pcmat', r'pcmp post tax'],
  'product': [r'\bsia\b', r'supp insurance', r'product'],
  'other_total': [r'total other deduc'],
@@ -1124,6 +1132,8 @@ def to_paycheck(rec) -> Paycheck:
                     medicare_gross=g('medicare_gross'), net_pay=g('net_pay'), premium=g('premium'),
                     reimbursement=g('reimbursement'), fee=g('fee'), product=g('product'), retirement=g('retirement'),
                     cafeteria=g('cafeteria'), other_deductions=g('other_deductions'), source=rec.get('source', ''))
+    pc.local = g('local')
+    pc.local_code = rec.get('local_code') or ''
     pc.federal_unreliable = rec.get('federal_unreliable')
     for k in ('w4_status', 'w4_multijob', 'w4_children', 'w4_extra', 'retirement_line', 'other_total',
               'total_deductions', 'net_pay_corrected', 'net_pay_unreliable', 'net_pay_disputed'):
@@ -1169,3 +1179,29 @@ def match_key(rec):
         parts = nm.split()
         nm = f"{parts[0]} {parts[-1]}" if len(parts) > 1 else nm
     return nm
+
+
+# ---------------------------------------------------------------- pay period
+PERIOD_RE = re.compile(
+    r'pay\s*period\s*:?\s*(\d{1,2}/\d{1,2}/\d{2,4})\s*(?:to|through|-|–)\s*(\d{1,2}/\d{1,2}/\d{2,4})',
+    re.I)
+CHECKDATE_RE = re.compile(r'check\s*date\s*:?\s*(\d{1,2}/\d{1,2}/\d{2,4})', re.I)
+
+
+def period_of(text):
+    """The pay period and cheque date a register prints on every page.
+
+    A before-and-after comparison is only meaningful when the two runs cover the SAME pay period.
+    At The Breathing Association they did not: 25 June to 9 July against 10 July to 24 July. Every
+    difference between the two then carries a fortnight of ordinary payroll movement as well as the
+    premium, and nine of thirty employees had a pay change mixed into their figures. Read it and
+    say so, rather than letting it pass as programme effect.
+    """
+    out = {}
+    m = PERIOD_RE.search(text or '')
+    if m:
+        out['period'] = (m.group(1), m.group(2))
+    m = CHECKDATE_RE.search(text or '')
+    if m:
+        out['check_date'] = m.group(1)
+    return out

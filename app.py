@@ -9,6 +9,7 @@ from flask import Flask, request, jsonify, send_file, render_template, abort, ma
 from services import build as builder
 from services import report as reporter
 from services import groq_client
+from services import register_audit
 
 app = Flask(__name__, static_folder='static', template_folder='templates')
 app.config['MAX_CONTENT_LENGTH'] = 80 * 1024 * 1024
@@ -161,6 +162,50 @@ def download(job):
                           ai_paragraph=j['para'], period=j['period'])
     name = f"{(j['client'] or 'payroll').replace(' ', '_')}_reconciliation.docx"
     return send_file(io.BytesIO(data), as_attachment=True, download_name=name,
+                     mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document')
+
+
+@app.post('/register')
+def register_route():
+    """Census + previous register + mock register -> the Proposal versus Payroll pack.
+
+    For a Texas ESC payroll register (report 4packr01), which is a text PDF. The four-upload
+    route above is for scanned payslips. Returns the docx, or JSON when ?format=json.
+    """
+    if not register_audit.AVAILABLE:
+        return jsonify({'error': 'register analysis unavailable', 'detail': register_audit.IMPORT_ERROR}), 503
+    cen, prev, mock = _file('census'), _file('previous'), _file('mock')
+    missing = [n for n, v in (('census', cen), ('previous', prev), ('mock', mock)) if not v]
+    if missing:
+        return jsonify({'error': 'missing files', 'missing': missing}), 400
+    try:
+        fee_ee = float(request.form.get('fee_employee') or 0)
+        fee_er = float(request.form.get('fee_employer') or 0)
+    except ValueError:
+        return jsonify({'error': 'fee_employee and fee_employer must be numbers'}), 400
+    if fee_ee <= 0:
+        return jsonify({'error': 'fee_employee is required'}), 400
+    try:
+        docx, xlsx, summary = register_audit.run(
+            cen[0], cen[1], prev[0], mock[0],
+            request.form.get('client', ''), fee_ee, fee_er,
+            request.form.get('premium'), request.form.get('state'))
+    except register_audit.RegisterError as e:
+        # a parse that does not tie to the register's own totals page is a hard stop, never a
+        # silent partial answer
+        return jsonify({'error': 'parse gate failed', 'detail': str(e)}), 422
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'error': 'analysis failed', 'detail': str(e)}), 500
+    if request.args.get('format') == 'json':
+        return jsonify(summary)
+    name = (summary.get('client') or 'Client').replace(' ', '_')
+    if request.args.get('format') == 'xlsx':
+        return send_file(io.BytesIO(xlsx), as_attachment=True,
+                         download_name='%s_Proposal_vs_Payroll.xlsx' % name,
+                         mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    return send_file(io.BytesIO(docx), as_attachment=True,
+                     download_name='%s_Proposal_vs_Payroll.docx' % name,
                      mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document')
 
 

@@ -28,6 +28,7 @@ def run(census_bytes=None, report_bytes=None, before=None, after=None, before_na
         notes.append(f'Proposal report: {len(report_recs)} rows from sheet "{t}"')
 
     store_stats = {}
+    periods = {}
 
     def payroll(blob, label):
         if not blob:
@@ -37,8 +38,39 @@ def run(census_bytes=None, report_bytes=None, before=None, after=None, before_na
             recs = P.paychecks_from_sheet(data)
             notes.append(f'{label}: {len(recs)} rows from spreadsheet {fname}')
         else:
-            recs = P.paychecks_from_pdf(data, hint=label, progress=progress, source_name=fname,
-                                        store_stats=store_stats)
+            # A multi-employee payroll register is not a payslip pack and the payslip reader
+            # returns nothing from one. Detect it from the document and read it properly.
+            recs = None
+            try:
+                from . import register_reader as RR
+                # The roster is the real employees only. A savings report carries Total and
+                # Monthly Average rows with no name, and feeding those to the completeness gate
+                # makes it fail on rows that were never employees.
+                roster, seen = [], set()
+                for r in (census_recs or []) + (report_recs or []):
+                    ln = str(r.get('last_name') or r.get('employee_last_name') or '').strip()
+                    if not ln or ln.lower() in ('total', 'monthly average', 'totals') or ln in seen:
+                        continue
+                    seen.add(ln)
+                    roster.append((ln, None))
+                recs, rep = RR.read(data, label, roster=roster or None)
+                if recs is not None and rep.get('period'):
+                    periods[label] = rep['period']
+                if recs is not None:
+                    notes.append('%s: read as a %s, %d employees, %s'
+                                 % (label, rep.get('kind'), len(recs), rep.get('layout', '')))
+            except Exception as e:
+                notes.append('%s: register reader unavailable or failed (%s); fell back to the '
+                             'payslip reader' % (label, str(e)[:160]))
+                recs = None
+            if recs is None:
+                recs = P.paychecks_from_pdf(data, hint=label, progress=progress, source_name=fname,
+                                            store_stats=store_stats)
+            try:
+                txt = ' '.join(str(getattr(r, 'raw_text', '') or '') for r in recs)[:200000]
+                periods[label] = P.period_of(txt)
+            except Exception:
+                pass
             failed = sum(1 for r in recs if not (r.get('name') or r.get('employee_id')))
             if failed:
                 notes.append(f'{label}: {failed} pages could not be read')
@@ -124,4 +156,26 @@ def run(census_bytes=None, report_bytes=None, before=None, after=None, before_na
         notes.append(f'{len(corrected)} employees carry a recorded human correction to a figure on their statement')
     summary = summarise(audits)
     summary['population']['unmatched_statements'] = len(orphan_b) + len(orphan_a)
+
+    # A before-and-after is only meaningful when both runs cover the SAME pay period. Where they
+    # do not, every difference carries ordinary payroll movement as well as the premium, and the
+    # reconciliation cannot be read as a programme result. Say so at the top rather than let it
+    # pass.
+    pb, pa = periods.get('Payroll before', {}), periods.get('Payroll after', {})
+    summary['periods'] = dict(before=pb, after=pa)
+    if pb.get('period') and pa.get('period') and pb['period'] != pa['period']:
+        summary['period_mismatch'] = dict(
+            before='%s to %s' % pb['period'], after='%s to %s' % pa['period'],
+            check_before=pb.get('check_date'), check_after=pa.get('check_date'))
+        notes.append('PAY PERIODS DO NOT MATCH: the before register covers %s to %s and the after '
+                     'register covers %s to %s. Differences between them include ordinary payroll '
+                     'movement as well as the premium.' % (pb['period'] + pa['period']))
+
+    # Municipal income tax the proposal never counted.
+    loc = [a for a in audits if (a.local_gap or 0) > 0.02]
+    if loc:
+        tot = round(sum(a.local_gap for a in loc), 2)
+        summary['local_tax'] = dict(employees=len(loc), amount=tot)
+        notes.append('%d employees had city or local income tax reduced by the premium, worth %.2f '
+                     'a month, which the proposal does not count.' % (len(loc), tot))
     return audits, summary, notes

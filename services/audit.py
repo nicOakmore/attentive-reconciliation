@@ -32,6 +32,8 @@ class Paycheck:
     state_code: str = ''
     social_security: Optional[float] = None
     medicare: Optional[float] = None
+    local: Optional[float] = None             # municipal / city income tax, this period
+    local_code: str = ''                      # the authority, e.g. OH-COL1 Columbus
     taxable_wages: Optional[float] = None
     medicare_gross: Optional[float] = None
     net_pay: Optional[float] = None
@@ -64,6 +66,7 @@ class Engine:
     state_savings: Optional[float] = None
     ss_savings: Optional[float] = None
     medicare_savings: Optional[float] = None
+    local_savings: Optional[float] = None     # the engine has no such column today; stays None
     gross_savings: Optional[float] = None
     fee: Optional[float] = None
     allotment: Optional[float] = None
@@ -112,6 +115,7 @@ class EmployeeAudit:
     # payroll result
     payroll_federal_savings: Optional[float] = None
     payroll_state_savings: Optional[float] = None
+    payroll_local_savings: Optional[float] = None
     payroll_fica_savings: Optional[float] = None
     payroll_fee: Optional[float] = None
     expected_net_change: Optional[float] = None
@@ -121,6 +125,7 @@ class EmployeeAudit:
     allotment_gap: Optional[float] = None
     federal_gap: Optional[float] = None
     state_gap: Optional[float] = None
+    local_gap: Optional[float] = None
     fica_gap: Optional[float] = None
     # census against paycheck, monthly
     census_pretax: Optional[float] = None
@@ -152,6 +157,8 @@ def audit_employee(emp: EmployeeAudit) -> EmployeeAudit:
         emp.payroll_federal_savings = per_month(b.federal - a.federal, pp)
     if b.state is not None and a.state is not None:
         emp.payroll_state_savings = per_month(b.state - a.state, pp)
+    if b.local is not None and a.local is not None:
+        emp.payroll_local_savings = per_month(b.local - a.local, pp)
     sf = lambda p: (p.social_security or 0) + (p.medicare or 0)
     if b.social_security is not None or b.medicare is not None:
         emp.payroll_fica_savings = per_month(sf(b) - sf(a), pp)
@@ -161,7 +168,8 @@ def audit_employee(emp: EmployeeAudit) -> EmployeeAudit:
     if b.net_pay is not None and a.net_pay is not None:
         actual = (a.net_pay - b.net_pay) + (a.product or 0)
         emp.actual_net_change = per_month(actual, pp)
-    parts = [emp.payroll_federal_savings, emp.payroll_state_savings, emp.payroll_fica_savings]
+    parts = [emp.payroll_federal_savings, emp.payroll_state_savings, emp.payroll_fica_savings,
+             emp.payroll_local_savings]
     if any(p is not None for p in parts) and emp.payroll_fee is not None:
         emp.expected_net_change = r2(sum(p or 0 for p in parts) - emp.payroll_fee)
     if emp.expected_net_change is not None and emp.actual_net_change is not None:
@@ -174,6 +182,10 @@ def audit_employee(emp: EmployeeAudit) -> EmployeeAudit:
         emp.federal_gap = r2(emp.payroll_federal_savings - e.federal_savings)
     if e.state_savings is not None and emp.payroll_state_savings is not None:
         emp.state_gap = r2(emp.payroll_state_savings - e.state_savings)
+    # The engine carries no municipal column, so anything the payroll saved here is money the
+    # proposal never counted. It understates, which is why it went unnoticed.
+    if emp.payroll_local_savings is not None:
+        emp.local_gap = r2(emp.payroll_local_savings - (e.local_savings or 0))
     eng_fica = (e.ss_savings or 0) + (e.medicare_savings or 0)
     if emp.payroll_fica_savings is not None and (e.ss_savings is not None or e.medicare_savings is not None):
         emp.fica_gap = r2(emp.payroll_fica_savings - eng_fica)
@@ -271,6 +283,9 @@ _ACTIONS = {
     'The proposal starts from less income than the payslip shows':
         'Reduce the census pre-tax fields to match the payslip.',
     'The W-4 on payroll differs from the census': 'Correct the census W-4 columns to match payroll.',
+    'The proposal does not count city or local income tax':
+        'Add municipal income tax to the calculation. The payroll charges it on the same wages and '
+        'the premium reduces it, so the proposal is understating by {local_gap} a month.',
     # programme settings
     'The census does not have Social Security set to N': 'Set the census SocialSec column to N.',
     'The proposal counts Social Security savings this payroll never pays': 'Set the census SocialSec column to N.',
@@ -316,6 +331,7 @@ def _actions(emp: EmployeeAudit) -> str:
         return ''
     ev = _evidence(emp)
     fmt = {k: (_m(v) if isinstance(v, (int, float)) else v) for k, v in ev.items()}
+    fmt['local_gap'] = _m(emp.local_gap or 0)
     steps, seen = [], set()
     for f in emp.findings:
         step = getattr(f, 'action', '') or ''
@@ -355,6 +371,7 @@ _ORDER = {
     'A deduction sits in the wrong census column': 24,
     'The proposal starts from less income than the payslip shows': 25,
     'The W-4 on payroll differs from the census': 26,
+    'The proposal does not count city or local income tax': 27,
     # 3. programme settings
     'The census does not have Social Security set to N': 30,
     'The census has Social Security set to N but payroll deducts it': 30,
@@ -722,7 +739,14 @@ def _attribute(emp: EmployeeAudit) -> list:
         return out
     ev = _evidence(emp)
     fmt = {k: (_m(v) if isinstance(v, (int, float)) else v) for k, v in ev.items()}
+    fmt['local_gap'] = _m(emp.local_gap or 0)
     fmt['ret_unnamed'] = _m(abs(ev['ret_unnamed'] or 0))
+    if (emp.local_gap or 0) > CENT and not emp.engine.local_savings:
+        out.append(Finding(
+            'The proposal does not count city or local income tax', emp.local_gap,
+            'Payroll withheld %s of %s a month less after the premium. The proposal has no '
+            'municipal column, so none of it is counted and the figure we quote is low by that much.'
+            % (_m(emp.local_gap), emp.before.local_code or 'city income tax')))
     templates = OR.details()
     actions = OR.actions()
     for row in OR.solve('causeAttribution', ev):

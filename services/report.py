@@ -143,6 +143,12 @@ def _recon_rows(a):
             rows.append([label, money(eng), money(pay), '$0.00'])
         else:
             rows.append([label, money(eng), money(pay), signed(diff)])
+    if a.payroll_local_savings is not None:
+        # engine column first, then payroll, to match the rows above. The engine has no municipal
+        # column at all, so it prints as not counted rather than as zero.
+        rows.append(['City or local income tax saved',
+                     money(a.engine.local_savings) if a.engine.local_savings else 'not counted',
+                     money(a.payroll_local_savings), signed(a.local_gap)])
     return rows
 
 
@@ -281,6 +287,23 @@ def build(audits, summary, notes, client='', files=None, ai_paragraph='', period
         s.top_margin = s.bottom_margin = Inches(0.8)
     _p(doc, 'PAYROLL RECONCILIATION', size=20, bold=True, color=NAVY, space_after=0)
     _p(doc, f"{client or 'Client'}{'  ·  ' + period if period else ''}", size=10, color=GREY, space_after=16)
+    pm = summary.get('period_mismatch')
+    if pm:
+        _p(doc, 'The two payroll runs are different pay periods', size=12, bold=True, color=RED, space_after=3)
+        _p(doc, f"The before register covers {pm['before']} and the after register covers {pm['after']}. "
+                f"They are different periods, not the same period run twice, so every difference below "
+                f"carries ordinary payroll movement as well as the premium: a change in hours, overtime, "
+                f"a garnishment, a new deduction. Figures for an employee whose pay moved between the two "
+                f"runs are not a measure of the programme. A clean reconciliation needs a mock run covering "
+                f"the same period as the before register.", space_after=10)
+    lt = summary.get('local_tax')
+    if lt:
+        _p(doc, 'City or local income tax is not counted in the proposal', size=12, bold=True, color=RED, space_after=3)
+        _p(doc, f"{lt['employees']} employees had municipal income tax reduced by the premium, worth "
+                f"{money(lt['amount'])} a month between them. The proposal carries columns for state, "
+                f"federal, Social Security and Medicare only, so none of this is counted and the figure "
+                f"quoted to those employees is low by that much. This runs in their favour, which is why "
+                f"it is easily missed.", space_after=10)
     _p(doc, 'Summary', size=12, bold=True, color=NAVY, space_after=4)
     if ai_paragraph:
         _p(doc, ai_paragraph, space_after=8)
