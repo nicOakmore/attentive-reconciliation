@@ -349,12 +349,30 @@ def _vision_ocr(png):
         except OSError: pass
 
 
+# "Surname, Forename" next to an employee number. Measured on the Pregnancy Help Center pack,
+# this is what actually separates the right rotation from the wrong one: the keywords survive a
+# bad rotation often enough to tie, while a readable name does not.
+_NAME_NEAR_ID = re.compile(r"[A-Z][A-Za-z'\-]+,\s*[A-Z][A-Za-z'\- ]{1,24}?\s*(\||\s)\s*Emp\s*[#:]", re.I)
+_MONEY_TOK = re.compile(r'\d[\d,]*\.\d\d')
+
+
 def _orientation_score(text):
-    """How much a payroll statement this reading looks like. Used to pick the right rotation."""
-    low = (text or '').lower()
+    """How much a payroll statement this reading looks like. Used to pick the right rotation.
+
+    Keywords alone were not enough. On a rotated pack the wrong angle still scored eight on
+    stray words, so the reader settled for it and the page came back with figures but no name:
+    five of nine Pregnancy Help pages carried a readable name at some angle and only two were
+    found. A legible employee name, and the sheer count of money tokens, discriminate where the
+    keywords tie.
+    """
+    t = text or ''
+    low = t.lower()
     score = sum(2 for pats in LINE_PATTERNS.values() for p in pats if re.search(p, low))
     for kw in ('employee name', 'net pay', 'taxable wages', 'medicare', 'withholding', 'gross'):
         score += 3 if kw in low else 0
+    if _NAME_NEAR_ID.search(t):
+        score += 10
+    score += min(len(_MONEY_TOK.findall(t)) // 10, 6)
     return score
 
 
@@ -365,7 +383,18 @@ def ocr_page(data: bytes, index: int, scale=2.8, hint_box=None):
     png = pdf_page_png(data, index, scale=scale)
     first = hint_box[0] if (hint_box and hint_box[0] is not None) else 0
     text = _ocr_rotated(png, first)
-    if _orientation_score(text) >= 8:
+    # Accept the first reading when it is convincingly a statement. The old bar of 8 was
+    # reachable on a badly rotated page, so the cheaper reading won before a better angle was
+    # tried. Raising it alone made every page pay for three more rotations and took a 41 page
+    # pack from 22 seconds to 261, so a legible employee name short circuits it: when the name
+    # reads, the page is the right way up and there is nothing to gain from turning it.
+    # Accept the first reading only when it is convincingly a statement. The old bar of 8 was
+    # reachable on a badly rotated page, so the cheaper reading won before a better angle was
+    # tried and the page came back with figures but no name. Measured on a cleared page store:
+    # Tioga 41 of 41 names either way at 173 seconds against 377, Pregnancy Help 2 names
+    # against 5. Roughly twice the time on a path that already runs in the background, for two
+    # and a half times the names on a rotated pack.
+    if _orientation_score(text) >= 18:
         return text
     best, best_score, best_angle = text, _orientation_score(text), first
     for angle in (0, 180, 90, 270):
@@ -375,7 +404,7 @@ def ocr_page(data: bytes, index: int, scale=2.8, hint_box=None):
         sc = _orientation_score(t)
         if sc > best_score:
             best, best_score, best_angle = t, sc, angle
-        if best_score >= 24:
+        if best_score >= 30:
             break
     if hint_box is not None and best_score >= 8 and best_angle != 0:
         hint_box[0] = best_angle          # a pack that is rotated is rotated throughout

@@ -66,20 +66,35 @@ def looks_like_register(data):
         if REGISTER_TITLE.search(txt):
             return 'text-register', path
         return 'payslips', path
-    # no text layer: recognise the first page and look for the same title
+    # No text layer, so recognise a page and look for the same title. The title alone is not
+    # enough to decide: a scanned PAYSLIP pack prints "PAYROLL REGISTER" at the top of every
+    # page too, one employee per page. Pregnancy Help Center is exactly that, and routing it to
+    # the multi-employee reader returns nothing. So confirm the shape as well as the title by
+    # counting employee blocks on a page: a real register carries several, a payslip carries one.
     try:
-        from scanned_register import _render, _ocr
+        from scanned_register import _render, _ocr, _tokens, _blocks
         d = os.path.dirname(path)
         pngs = _render(path, d, dpi=150)
         if not pngs:
             return 'payslips', path
         from PIL import Image
+        titled = False
+        probe_page = pngs[1] if len(pngs) > 1 else pngs[0]
         for ang in (0, -90, 90):
             probe = os.path.join(d, 'probe%d.png' % ang)
             im = Image.open(pngs[0])
             (im if ang == 0 else im.rotate(ang, expand=True)).save(probe)
-            words = ' '.join(t for t, c, b in _ocr(probe))
-            if REGISTER_TITLE.search(words):
+            if REGISTER_TITLE.search(' '.join(t for t, c, b in _ocr(probe))):
+                titled = True
+                break
+        if not titled:
+            return 'payslips', path
+        for ang in (0, -90, 90, 180):
+            shape = os.path.join(d, 'shape%d.png' % ang)
+            im = Image.open(probe_page)
+            (im if ang == 0 else im.rotate(ang, expand=True)).save(shape)
+            blocks = _blocks(_tokens(_ocr(shape)))
+            if sum(1 for b in blocks if any(t['t'] == 'Net' for t in b)) >= 2:
                 return 'scanned-register', path
     except Exception:
         pass
