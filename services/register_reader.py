@@ -245,6 +245,9 @@ def read_scanned_register(path, label, roster=None):
                         reimb=e['ded'].get('SIMRP'), empid=e.get('empid')))
     rep['kind'] = 'scanned-register'
     rep['layout'] = lay.name
+    if rep.get('names_unresolved'):
+        rep['layout'] += (' (%d of %d names could not be tied to a person)'
+                          % (rep['names_unresolved'], rep.get('employees', 0)))
     rep['period'] = _period_from_pages(path)
     return out, rep
 

@@ -320,6 +320,89 @@ def _hunt(pages, target):
 
 
 # --------------------------------------------------------------- entry point
+JUNK = ('payroll register', 'employees female', 'employees male', 'company totals',
+        'grand total', 'totals', 'department', 'check register', 'period ending',
+        'emp id', 'employee name', 'continued')
+
+
+def _clean_name(raw):
+    """Strip the column labels the recogniser sweeps up with the name."""
+    t = re.sub(r'\s+', ' ', str(raw or '')).strip()
+    t = re.sub(r'\bemp\s*[i1lt][da]\b.*$', '', t, flags=re.I).strip()
+    t = re.sub(r'\bpayroll\s+register(\s+with(\s+ytd)?)?\b', '', t, flags=re.I).strip()
+    t = re.sub(r'\bemployees?\s+(fe)?male\b', '', t, flags=re.I).strip()
+    t = re.sub(r'[^A-Za-z,.\'\- ]+', ' ', t)
+    t = re.sub(r'\s+', ' ', t).strip(' .,-')
+    return t
+
+
+def _is_junk(e, nets=None, median=None):
+    """A header or a totals block is not a person. A person whose NAME was misread is.
+
+    Telling them apart on the name alone throws away real employees: the block finder sweeps the
+    page title into the name field, so "Payroll Register" with its own employee number and a
+    plausible net is a person, not a header. What actually distinguishes a totals block is the
+    money: its net repeats across blocks and dwarfs an individual cheque.
+    """
+    n = _clean_name(e.get('name')).lower()
+    net = e.get('net')
+    if net and median and net > 5 * median:
+        return True                              # a company or department total
+    if net and nets and nets.get(round(net, 2), 0) > 1 and not e.get('empid'):
+        return True                              # the same total printed twice
+    if len(n) < 3 and not e.get('empid') and not net:
+        return True
+    return any(j in n for j in JUNK) and not e.get('empid')
+
+
+# What the recogniser actually confuses on these photocopies, measured on the Breathing
+# Association scans: l/I/1/t, O/0/D, rn/m, S/5, B/8, G/6. Folding them before comparing lets
+# "Haltston" reach "Hairston" and "Mariner" reach "Martinez".
+_FOLD = str.maketrans({'1': 'l', 'i': 'l', 't': 'l', '0': 'o', 'd': 'o', '5': 's', '8': 'b',
+                       '6': 'g', 'q': 'g'})
+
+
+def _fold(s):
+    return re.sub(r'rn', 'm', str(s or '').lower()).translate(_FOLD)
+
+
+def _surname(n):
+    n = str(n or '').strip()
+    return re.sub(r'[^a-z]', '', (n.split(',')[0] if ',' in n else n.split(' ')[0]).lower())
+
+
+def _similar(a, b):
+    """Best of the plain comparison and the OCR-folded one."""
+    return max(difflib.SequenceMatcher(None, a, b).ratio(),
+               difflib.SequenceMatcher(None, _fold(a), _fold(b)).ratio())
+
+
+def _adopt_roster_names(emps, roster):
+    """Give each block the roster spelling of the name it most resembles, one roster entry at
+    most once. Matching is on the surname, which the recogniser gets closest to right, and a
+    block that resembles nothing keeps its own reading and is marked unmatched so a reader can
+    see it rather than having a wrong name asserted."""
+    pool = list(roster)
+    for e in emps:
+        mine = _surname(e.get('name'))
+        if not mine or not pool:
+            e['name_matched'] = False
+            continue
+        best, bestr = None, 0.0
+        for cand in pool:
+            r = _similar(mine, _surname(cand))
+            if r > bestr:
+                best, bestr = cand, r
+        if best is not None and bestr >= 0.70:
+            e['name'] = best
+            e['name_matched'] = True
+            e['name_score'] = round(bestr, 3)
+            pool.remove(best)
+        else:
+            e['name_matched'] = False
+            e['name_score'] = round(bestr, 3)
+
+
 def read_scanned(pdf_path, layout, expect_nets=None, expect_names=None, expect_roster=None,
                  workdir=None, dpi=220):
     """expect_roster is the strong form: [(surname, net_pay), ...]. An employee is accounted for
@@ -353,10 +436,33 @@ def read_scanned(pdf_path, layout, expect_nets=None, expect_names=None, expect_r
             e = _employee(blk, layout)
             if e.get('net') or e.get('tax'):
                 e['page'] = pg
+                e['name_raw'] = e.get('name') or ''
+                e['name'] = _clean_name(e.get('name'))
                 emps.append(e)
+    # A page header and a totals block both look like an employee to the block finder: they sit
+    # in the same place and carry money. Dropping them here rather than downstream keeps the
+    # population honest, and the count is what every later gate is measured against.
+    _nets = collections.Counter(round(e['net'], 2) for e in emps if e.get('net'))
+    _vals = sorted(e['net'] for e in emps if e.get('net'))
+    _median = _vals[len(_vals) // 2] if _vals else None
+    emps = [e for e in emps if not _is_junk(e, _nets, _median)]
 
+    # OCR will never spell these names reliably; the scans are photocopies. The census already
+    # says who is on the register, so match each block to the roster and adopt the roster's
+    # spelling. Without this the names reach the reconciliation as "FoStead. Lintsex M. Emp id"
+    # and match nothing, which is exactly what happened on the first deployed run.
+    roster_names = [nm for nm, _ in (expect_roster or [])] or list(expect_names or [])
+    if roster_names:
+        _adopt_roster_names(emps, roster_names)
+
+    named = sum(1 for e in emps if e.get('name_matched'))
     report = dict(pdf=pdf_path, rotation=ang, pages=len(pages), employees=len(emps),
-                  workdir=d, missing=[], found_by_hunt=[])
+                  workdir=d, missing=[], found_by_hunt=[],
+                  # How many names the recogniser produced that could be tied to a real person.
+                  # A block whose name could not be resolved still carries its money and its
+                  # employee number, so it is counted, but it will not match by name downstream
+                  # and a reader is entitled to know how many of those there are.
+                  names_resolved=named, names_unresolved=len(emps) - named)
 
     have = {round(e['net'], 2) for e in emps if e.get('net')}
     if expect_roster:

@@ -323,8 +323,20 @@ def page(key):
 
 @app.get('/healthz')
 def healthz():
+    """Say which build is answering.
+
+    Without this there is no way to tell a finished deploy from one still building, and the
+    only check left is to upload a file and infer the version from the behaviour. Render sets
+    RENDER_GIT_COMMIT; the OCR engine is reported too, because the scanned-register path
+    depends on which one the platform actually has.
+    """
     ok, model = groq_client.health()
-    return jsonify(status='ok', groq=ok, model=model, jobs=len(JOBS))
+    import importlib.util as _u
+    ocr = ('macOS Vision' if _u.find_spec('ocrmac')
+           else ('RapidOCR' if _u.find_spec('rapidocr_onnxruntime') else 'none'))
+    return jsonify(status='ok', groq=ok, model=model, jobs=len(JOBS),
+                   commit=(os.environ.get('RENDER_GIT_COMMIT') or 'local')[:7],
+                   ocr=ocr)
 
 
 if __name__ == '__main__':
