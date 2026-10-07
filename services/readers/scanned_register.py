@@ -72,9 +72,43 @@ def _render(pdf_path, d, dpi=220):
     return sorted(glob.glob(os.path.join(d, 'p-*.png')))
 
 
+_RAPID = None
+
+
 def _ocr(png):
-    from ocrmac import ocrmac
-    return [[t, c, list(b)] for t, c, b in ocrmac.OCR(png, recognition_level='accurate').recognize()]
+    """Text with boxes as (text, confidence, [x, y, w, h]), normalised, y measured from the BOTTOM.
+
+    macOS Vision reads these scans better than anything else to hand, so it is used when present.
+    It does not exist on Linux, which is where this runs in production, and with no fallback every
+    scanned register failed there. RapidOCR is already a dependency of the app and runs on both.
+    Its boxes are absolute polygons with y from the TOP, so they are converted to the Vision
+    convention here rather than at each of the four call sites.
+
+    Set SCANREG_OCR=rapid to force the fallback, which is how the Linux path gets tested on a Mac.
+    """
+    if os.environ.get('SCANREG_OCR', '').lower() not in ('rapid', 'rapidocr'):
+        try:
+            from ocrmac import ocrmac
+            return [[t, c, list(b)]
+                    for t, c, b in ocrmac.OCR(png, recognition_level='accurate').recognize()]
+        except Exception:
+            pass
+    global _RAPID
+    from PIL import Image
+    if _RAPID is None:
+        from rapidocr_onnxruntime import RapidOCR
+        _RAPID = RapidOCR()
+    w, h = Image.open(png).size
+    res, _ = _RAPID(png)
+    out = []
+    for box, text, conf in (res or []):
+        xs = [p[0] for p in box]
+        ys = [p[1] for p in box]
+        x0, x1 = min(xs) / w, max(xs) / w
+        ytop, ybot = min(ys) / h, max(ys) / h
+        # Vision's y is the box's lower edge measured up from the bottom of the page.
+        out.append([text, float(conf), [x0, 1.0 - ybot, x1 - x0, ybot - ytop]])
+    return out
 
 
 def _orient(d, pngs):
