@@ -46,13 +46,21 @@ def run(census_bytes=None, report_bytes=None, before=None, after=None, before_na
                 # The roster is the real employees only. A savings report carries Total and
                 # Monthly Average rows with no name, and feeding those to the completeness gate
                 # makes it fail on rows that were never employees.
+                # Give the roster the FORENAME too. A scanned register's surname is often the
+                # worst-read part of the line, and the reader scores the forename as well, so a
+                # surname-only roster throws away half the evidence: "BARES. PAMELA" reaches
+                # "Bailey, Pamela K." on the forename and on nothing else.
                 roster, seen = [], set()
                 for r in (census_recs or []) + (report_recs or []):
                     ln = str(r.get('last_name') or r.get('employee_last_name') or '').strip()
-                    if not ln or ln.lower() in ('total', 'monthly average', 'totals') or ln in seen:
+                    fn = str(r.get('first_name') or r.get('employee_first_name') or '').strip()
+                    if not ln or ln.lower() in ('total', 'monthly average', 'totals'):
                         continue
-                    seen.add(ln)
-                    roster.append((ln, None))
+                    full = ('%s, %s' % (ln, fn)).strip(', ')
+                    if full.lower() in seen:
+                        continue
+                    seen.add(full.lower())
+                    roster.append((full, None))
                 recs, rep = RR.read(data, label, roster=roster or None)
                 if recs is not None and rep.get('period'):
                     periods[label] = rep['period']

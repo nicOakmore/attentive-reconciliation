@@ -212,13 +212,62 @@ def _fica_base(tax):
     return (round(best, 2) if best else None), votes
 
 
+# Page furniture and column headings. Anything here is never part of a person's name, and
+# leaving the column words out let the mock register return sixteen employees called "Code".
+PAGE_WORDS = {'payroll', 'register', 'with', 'ytd', 'the', 'breathing', 'association',
+              'pre', 'process', 'period', 'ending', 'page', 'company', 'date', 'check',
+              'employees', 'female', 'male', 'department', 'unknown', 'emp', 'id', 'totals',
+              'code', 'hours', 'hrs', 'amount', 'amt', 'rate', 'type', 'earnings', 'deductions',
+              'taxes', 'net', 'gross', 'dir', 'dep', 'current', 'qtd', 'descr', 'description',
+              'memo', 'other', 'total', 'pay', 'hour', 'run', 'org', 'loc', 'cost', 'center'}
+NAME_TOK = re.compile(r"^[A-Za-z][A-Za-z'\-,.]{1,}$")
+
+
+def _name_of(blk):
+    """The employee name row, found by the column header beneath it rather than by the top of
+    the block.
+
+    The block runs from this employee's Totals row up to the previous one, so its top edge is
+    whatever sits above: on the first block of a page that is the report title, which is how
+    employees arrived called "Payroll Register". The name is printed immediately above the
+    "Code / Hours / Amount / YTD" header that opens the earnings grid, and that header is a
+    reliable anchor on every page.
+    """
+    rows = {}
+    for t in blk:
+        rows.setdefault(round(t['y'], 3), []).append(t)
+    hdr_y = None
+    for y, ts in rows.items():
+        words = {t['t'].lower() for t in ts}
+        if 'code' in words and ({'amount', 'hours', 'hrs'} & words):
+            hdr_y = y if hdr_y is None else max(hdr_y, y)
+    bands = []
+    for y, ts in rows.items():
+        if hdr_y is not None and not (hdr_y + 0.002 <= y <= hdr_y + 0.035):
+            continue
+        got = [t for t in ts if t['x'] < 0.135 and NAME_TOK.match(t['t'])
+               and t['t'].lower().strip(".,'-") not in PAGE_WORDS]
+        if got:
+            bands.append((y, got))
+    if not bands:
+        # No header anchor on this block: fall back to the topmost name-like row that is not
+        # page furniture, which is still better than taking the top edge blind.
+        for y, ts in sorted(rows.items(), key=lambda kv: -kv[0]):
+            got = [t for t in ts if t['x'] < 0.135 and NAME_TOK.match(t['t'])
+                   and t['t'].lower().strip(".,'-") not in PAGE_WORDS]
+            if got:
+                bands = [(y, got)]
+                break
+    if not bands:
+        return ''
+    y, got = sorted(bands, key=lambda b: -b[0])[0]
+    return ' '.join(t['t'] for t in sorted(got, key=lambda t: t['x']))[:44]
+
+
 def _employee(blk, lay):
     c = lay.cols
     e = dict(tax={}, ded={}, net=None, gross=None, name=None, empid=None)
-    top = max(t['y'] for t in blk)
-    nm = [t for t in blk if t['y'] >= top - 0.02 and t['x'] < 0.13
-          and re.match(r"^[A-Za-z][A-Za-z'\-,.]{1,}$", t['t'])]
-    e['name'] = ' '.join(t['t'] for t in sorted(nm, key=lambda t: (-t['y'], t['x'])))[:44]
+    e['name'] = _name_of(blk)
     cands = []
     for t in blk:
         if t['t'] in ('Net', 'Dir', 'Dep'):
@@ -377,6 +426,28 @@ def _similar(a, b):
                difflib.SequenceMatcher(None, _fold(a), _fold(b)).ratio())
 
 
+def _forename(n):
+    n = str(n or '').strip()
+    rest = n.split(',', 1)[1] if ',' in n else ' '.join(n.split(' ')[1:])
+    return re.sub(r'[^a-z]', '', rest.lower())
+
+
+def _name_score(raw, cand):
+    """Score a block's reading against a roster name on surname AND forename.
+
+    Surname alone is not enough on these scans: "BARES. PAMELA" scores badly against "Bailey"
+    but its forename is a clean "PAMELA", and "Shonod, Jue queline" is only recognisable as
+    "Sherrod, Jacqueline" once the forename is read too.
+    """
+    sl, sr = _surname(raw), _surname(cand)
+    fl, fr = _forename(raw), _forename(cand)
+    last = _similar(sl, sr) if sl and sr else 0.0
+    first = _similar(fl, fr) if fl and fr else 0.0
+    whole = _similar(re.sub(r'[^a-z]', '', str(raw).lower()),
+                     re.sub(r'[^a-z]', '', str(cand).lower()))
+    return max(whole, 0.6 * last + 0.4 * first, last if last > 0.85 else 0.0)
+
+
 def _adopt_roster_names(emps, roster):
     """Give each block the roster spelling of the name it most resembles, one roster entry at
     most once. Matching is on the surname, which the recogniser gets closest to right, and a
@@ -384,13 +455,13 @@ def _adopt_roster_names(emps, roster):
     see it rather than having a wrong name asserted."""
     pool = list(roster)
     for e in emps:
-        mine = _surname(e.get('name'))
-        if not mine or not pool:
+        mine = e.get('name') or ''
+        if not _surname(mine) or not pool:
             e['name_matched'] = False
             continue
         best, bestr = None, 0.0
         for cand in pool:
-            r = _similar(mine, _surname(cand))
+            r = _name_score(mine, cand)
             if r > bestr:
                 best, bestr = cand, r
         if best is not None and bestr >= 0.70:
