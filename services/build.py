@@ -102,6 +102,11 @@ def run(census_bytes=None, report_bytes=None, before=None, after=None, before_na
         key = P.name_key(first, last)
         if not key.strip():
             continue
+        # A savings report ends with Total and Monthly Average rows. They carry figures but no
+        # employee, and listing them as people puts "Total: no payslip found" in front of the
+        # reader and inflates the employee count.
+        if str(first or '').strip().lower() in ('total', 'totals', 'monthly average', 'average'):
+            continue
         eid = str(r.get('client_employee_id') or r.get('employee_id') or '').strip()
         cen_row = cmap.get(key, {})
         c = Census(gross_annual=P.num(cen_row.get('gross_annual_taxable_wages') or r.get('annual_salary')),
