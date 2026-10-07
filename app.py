@@ -117,6 +117,9 @@ def _work(job, census, rep, before, after, client, period):
             print(f'[run {job}] {n}', flush=True)
         j.update(state='done', stage='done', audits=audits, summary=summary, notes=notes, client=client,
                  period=period, files=files, para=para,
+                 # kept so the audit review can cut its exhibits from the register pages
+                 payroll=dict(before=before[0] if before else None,
+                              after=after[0] if after else None),
                  payload=dict(job=job, seconds=round(time.time() - t0, 1), client=client, period=period,
                               summary=summary, notes=notes, files=files, paragraph=para,
                               employees=[_row(a) for a in audits]))
@@ -158,6 +161,13 @@ def download(job):
     j = JOBS.get(job)
     if not j:
         abort(404)
+    if (request.args.get('format') or '').lower() == 'review':
+        from services import review as reviewer
+        data = reviewer.build(j['audits'], j['summary'], j['notes'], client=j['client'],
+                              period=j['period'], files=j['files'], payroll=j.get('payroll'))
+        name = f"{(j['client'] or 'payroll').replace(' ', '_')}_audit_review.docx"
+        return send_file(io.BytesIO(data), as_attachment=True, download_name=name,
+                         mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document')
     data = reporter.build(j['audits'], j['summary'], j['notes'], client=j['client'], files=j['files'],
                           ai_paragraph=j['para'], period=j['period'])
     name = f"{(j['client'] or 'payroll').replace(' ', '_')}_reconciliation.docx"

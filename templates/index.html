@@ -116,7 +116,8 @@
       <span class="material-icons icon-sm">play_arrow</span> Run reconciliation
     </button>
     <div id="status" class="text-sm muted"></div>
-    <a id="dl" class="btn btn-stroked" style="display:none;"><span class="material-icons icon-sm">download</span> Download docx</a>
+    <a id="dl" class="btn btn-stroked" style="display:none;"><span class="material-icons icon-sm">download</span> Download reconciliation</a>
+    <a id="dlr" class="btn btn-stroked" style="display:none;"><span class="material-icons icon-sm">description</span> Download audit review</a>
   </div>
 
   <div id="out"></div>
@@ -144,6 +145,7 @@ async function run(sample) {
   document.getElementById('status').innerHTML = '<span class="spinner"></span> uploading';
   document.getElementById('btn-run').disabled = true;
   document.getElementById('dl').style.display = 'none';
+  document.getElementById('dlr').style.display = 'none';
   document.getElementById('out').innerHTML = '';
   try {
     const d = await poll(fd);
@@ -151,6 +153,8 @@ async function run(sample) {
     document.getElementById('status').textContent = d.employees.length + ' employees in ' + d.seconds + 's';
     const a = document.getElementById('dl');
     a.href = '/report/' + d.job + '.docx'; a.style.display = '';
+    const r = document.getElementById('dlr');
+    r.href = '/report/' + d.job + '.docx?format=review'; r.style.display = '';
   } catch (e) {
     document.getElementById('status').textContent = '';
     document.getElementById('out').innerHTML = '<div class="card"><div class="diag red">' + e.message + '</div></div>';

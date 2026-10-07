@@ -131,6 +131,13 @@ def read_text_register(path, label):
                      gate=[dict(control=c, parsed=g, printed=w) for c, g, w in reg.gate])
 
 
+ACRONYMS = {'ISD', 'CISD', 'USD', 'LLC', 'INC', 'TX', 'OH', 'ESC'}
+
+
+def _title_keep_acronyms(s):
+    return ' '.join(w if w.upper() in ACRONYMS else w.title() for w in str(s).split())
+
+
 def _txeis_programme_codes(reg):
     """Find the premium, reimbursement and fee codes across the WHOLE register.
 
@@ -205,8 +212,9 @@ def read_txeis_register(path, label):
                         empid=code))
     period = reg.period or {}
     rep = dict(kind='txeis-register', employees=len(out),
-               # The register prints the district in capitals. Our own prose does not shout.
-               layout='HRS2200 %s' % (reg.district or {}).get('name', '').title(),
+               # The register prints the district in capitals and our prose does not shout, but
+               # title case alone turns ISD into "Isd". Keep known acronyms whole.
+               layout='HRS2200 %s' % _title_keep_acronyms((reg.district or {}).get('name', '')),
                codes=dict(premium=pc, reimbursement=rc, fee=fc),
                period=({'period': (period.get('from'), period.get('thru')),
                         'check_date': period.get('pay_date')} if period.get('from') else {}),
