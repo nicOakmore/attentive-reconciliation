@@ -304,6 +304,26 @@ def build(audits, summary, notes, client='', files=None, ai_paragraph='', period
                 f"federal, Social Security and Medicare only, so none of this is counted and the figure "
                 f"quoted to those employees is low by that much. This runs in their favour, which is why "
                 f"it is easily missed.", space_after=10)
+    nc = summary.get('not_comparable')
+    if nc:
+        _p(doc, 'Some employees cannot be reconciled because their pay changed',
+           size=12, bold=True, color=RED, space_after=3)
+        _p(doc, f"{nc['employees']} employees were paid a different gross in the two runs, the largest "
+                f"by {money(nc['biggest'])} a month. For those employees the change in take home carries "
+                f"a pay change as well as the premium, so no part of it can be attributed to the "
+                f"programme. They are listed separately and are excluded from the causes below rather "
+                f"than averaged into them. Named: " + ', '.join(nc['names'])
+                + ('.' if nc['employees'] <= len(nc['names']) else ', and others.'), space_after=10)
+    fx = summary.get('fee_exceeds_saving')
+    if fx:
+        _p(doc, 'Some employees pay more in fee than they save',
+           size=12, bold=True, color=RED, space_after=3)
+        _p(doc, f"{fx['employees']} employees have a monthly tax saving smaller than the fee, "
+                f"{money(abs(fx['amount']))} a month between them. Nothing is miscalculated: the premium "
+                f"does not reduce enough tax to cover the fee, usually because the employee pays little "
+                f"or no federal income tax. This is an enrolment decision, not a payroll correction. "
+                f"Named: " + ', '.join(fx['names'])
+                + ('.' if fx['employees'] <= len(fx['names']) else ', and others.'), space_after=10)
     _p(doc, 'Summary', size=12, bold=True, color=NAVY, space_after=4)
     if ai_paragraph:
         _p(doc, ai_paragraph, space_after=8)
@@ -311,7 +331,8 @@ def build(audits, summary, notes, client='', files=None, ai_paragraph='', period
            [['Getting exactly what was promised', summary['matched'], f"{summary['matched']/max(summary['employees'],1):.1%}"],
             ['Different from the promise, with a cause we can show', summary['attributed'], f"{summary['attributed']/max(summary['employees'],1):.1%}"],
             ['Different, and we could not establish why', summary['unexplained'], f"{summary['unexplained']/max(summary['employees'],1):.1%}"],
-            ['Could not be checked, something was missing', summary['data_missing'], f"{summary['data_missing']/max(summary['employees'],1):.1%}"],
+            ['Not comparable, pay changed between the runs', (summary.get('not_comparable') or {}).get('employees', 0), f"{(summary.get('not_comparable') or {}).get('employees', 0)/max(summary['employees'],1):.1%}"],
+            ['Could not be checked, something was missing', max(summary['data_missing'] - (summary.get('not_comparable') or {}).get('employees', 0), 0), f"{max(summary['data_missing'] - (summary.get('not_comparable') or {}).get('employees', 0), 0)/max(summary['employees'],1):.1%}"],
             ['Total', summary['employees'], '100.0%']], [4.2, 1.4, 1.3])
     _p(doc, '', space_after=8)
     if summary['causes']:

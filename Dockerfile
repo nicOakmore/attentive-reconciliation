@@ -1,8 +1,10 @@
 FROM python:3.12-slim
 # RapidOCR reads these scanned statements accurately; tesseract stays as a fallback. libgomp is needed by
-# onnxruntime and libglib by the opencv build it loads.
+# onnxruntime and libglib by the opencv build it loads. poppler-utils supplies pdftotext and pdftoppm,
+# which every payroll register reader shells out to; without it a register silently reads as nothing.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     tesseract-ocr libtesseract-dev libgomp1 libglib2.0-0 libgl1 \
+    poppler-utils \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY requirements.txt .

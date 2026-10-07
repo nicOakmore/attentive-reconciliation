@@ -66,11 +66,16 @@ def run(census_bytes=None, report_bytes=None, before=None, after=None, before_na
             if recs is None:
                 recs = P.paychecks_from_pdf(data, hint=label, progress=progress, source_name=fname,
                                             store_stats=store_stats)
-            try:
-                txt = ' '.join(str(getattr(r, 'raw_text', '') or '') for r in recs)[:200000]
-                periods[label] = P.period_of(txt)
-            except Exception:
-                pass
+            # Only look for a period in the raw text when the register reader did not already
+            # give us one. It does, and P.period_of returns {} on register records because they
+            # carry no raw_text, so running it unconditionally threw the real period away and
+            # the pay-period check never fired.
+            if not periods.get(label):
+                try:
+                    txt = ' '.join(str(getattr(r, 'raw_text', '') or '') for r in recs)[:200000]
+                    periods[label] = P.period_of(txt)
+                except Exception:
+                    pass
             failed = sum(1 for r in recs if not (r.get('name') or r.get('employee_id')))
             if failed:
                 notes.append(f'{label}: {failed} pages could not be read')
@@ -122,6 +127,8 @@ def run(census_bytes=None, report_bytes=None, before=None, after=None, before_na
         arec = P.find(eid, first, last, a_id, a_name, a_last)
         anchor = (c.gross_annual / (c.pay_periods or 12)) if c.gross_annual else None
         for rec in (brec, arec):
+            if rec is not None and rec.get('gated'):
+                rec['_repaired'] = True      # read from a register that tied to its own totals
             if rec is not None and not rec.get('_repaired'):
                 P.anchor_and_solve(rec, anchor)      # gross anchor first, so validation uses the right gross
                 P.validate(rec)

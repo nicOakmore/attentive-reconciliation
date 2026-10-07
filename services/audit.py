@@ -36,6 +36,7 @@ class Paycheck:
     local_code: str = ''                      # the authority, e.g. OH-COL1 Columbus
     taxable_wages: Optional[float] = None
     medicare_gross: Optional[float] = None
+    supplemental: Optional[float] = None
     net_pay: Optional[float] = None
     premium: Optional[float] = None          # the pre-tax wellness deduction on the after paycheck
     reimbursement: Optional[float] = None    # the SIMRP line that returns the premium
@@ -140,6 +141,12 @@ class EmployeeAudit:
     fee_from_statement: bool = False
     ss_note: str = ''
     primary_action: str = ''
+    # A before and after only means anything when the two cheques pay the same work. Where gross
+    # moved, the change in net pay carries ordinary payroll movement as well as the premium, and
+    # no cause can be attributed from it. Measured, not assumed.
+    gross_change: Optional[float] = None
+    comparable: bool = True
+    fee_exceeds_saving: Optional[float] = None
 
     def as_dict(self):
         d = asdict(self)
@@ -165,6 +172,10 @@ def audit_employee(emp: EmployeeAudit) -> EmployeeAudit:
     emp.payroll_fee = per_month(a.fee, pp) if a.fee is not None else e.fee
     emp.fee_from_statement = a.fee is not None
 
+    if b.gross is not None and a.gross is not None:
+        emp.gross_change = per_month(a.gross - b.gross, pp)
+        # One cent of rounding is not a pay change. A dollar is.
+        emp.comparable = abs(emp.gross_change) <= 1.0
     if b.net_pay is not None and a.net_pay is not None:
         actual = (a.net_pay - b.net_pay) + (a.product or 0)
         emp.actual_net_change = per_month(actual, pp)
@@ -199,6 +210,16 @@ def audit_employee(emp: EmployeeAudit) -> EmployeeAudit:
         emp.ti_before_gap = r2(e.taxable_income_before - per_month(b.medicare_gross, pp))
 
     emp.findings = _attribute(emp)
+    emp.fee_exceeds_saving = _fee_check(emp)
+    if emp.fee_exceeds_saving:
+        emp.findings.append(Finding(
+            'The fee is larger than the saving', -emp.fee_exceeds_saving,
+            'The proposal puts this employee\'s monthly tax saving at %s against a fee of %s, so '
+            'taking part costs %s a month. Nothing is miscalculated; the premium does not reduce '
+            'enough tax to cover the fee.'
+            % (_m((emp.engine.gross_savings if emp.engine.gross_savings is not None else
+                   (emp.engine.fee or 0) - emp.fee_exceeds_saving)),
+               _m(emp.engine.fee or 0), _m(emp.fee_exceeds_saving))))
     emp.uncertainty = _uncertainty(emp)
     # Where a payslip does not add up and the census plus the statement's own arithmetic say decisively what one
     # misread line must have been, the audit uses the corrected figure and reports the correction, instead of
@@ -236,7 +257,18 @@ def audit_employee(emp: EmployeeAudit) -> EmployeeAudit:
                         f"On the {st['statement']} payslip the deductions exceed gross pay less take home pay by "
                         f"{_m(r)}.",
                         'Ask payroll for a clean copy of both payslips.'))
-    if emp.uncertainty and emp.uncertainty.get('cross_document'):
+    # A census carries the contract salary. Where the payslip also pays stipends or extra duty,
+    # the proposal was built from a smaller wage than payroll taxed, and the two will never agree.
+    # That is a named census gap, not a bad payslip, so say which it is.
+    sup = emp.before.supplemental or emp.after.supplemental
+    if sup and sup > CENT:
+        emp.findings.append(Finding(
+            'The census salary does not include supplemental pay', None,
+            'The payslip pays %s a month of supplemental pay on top of the contract salary. The '
+            'census carries the contract salary only, so the proposal is built from a smaller '
+            'wage than payroll actually taxes.' % _m(per_month(sup, emp.pay_periods)),
+            'Add supplemental pay to the census salary, or confirm it should be excluded.'))
+    if emp.uncertainty and emp.uncertainty.get('cross_document') and emp.comparable:
         known = {round(abs(f.amount), 2) for f in emp.findings if f.amount is not None}
         for d in emp.uncertainty['cross_document'].get('disagreements', []):
             for item in d['items']:
@@ -732,6 +764,18 @@ def _attribute(emp: EmployeeAudit) -> list:
     and puts the matched rows into words."""
     from . import oakmore_rules as OR
     out, b, a = [], emp.before, emp.after
+    if not emp.comparable and emp.gross_change is not None:
+        # Every difference on this employee carries a pay change as well as the premium, so no
+        # cause can be read from it. Naming one here is how a reconciliation invents findings:
+        # at Aspermont two employees were paid 2,500.00 and 1,500.00 more in the second period
+        # and the attribution charged the whole of it to the programme.
+        out.append(Finding(
+            'Gross pay changed between the two runs', None,
+            'Gross pay %s by %s a month between the two cheques, so the change in take home '
+            'carries ordinary payroll movement as well as the premium. This employee cannot be '
+            'reconciled until both runs cover the same work.'
+            % ('rose' if emp.gross_change > 0 else 'fell', _m(abs(emp.gross_change)))))
+        return out
     if emp.allotment_gap is not None and emp.allotment_gap >= -CENT:
         # The payment is not down: green, and that is it. No cause hunt on an employee who takes
         # home at least what was promised.
@@ -778,10 +822,31 @@ def _attribute(emp: EmployeeAudit) -> list:
     return out
 
 
+def _fee_check(emp: EmployeeAudit):
+    """An employee whose tax saving is smaller than the fee loses money every month.
+
+    This is not an error in anyone's arithmetic, it is an enrolment question, and it has to be
+    said out loud: at Aspermont two enrolled employees were down 65.58 and 26.16 a month and
+    fifteen more would have been down 96.99 had they joined. The earlier engine floored a
+    negative allotment at zero, which hid it.
+    """
+    e = emp.engine
+    saving = e.gross_savings
+    if saving is None:
+        parts = [e.federal_savings, e.state_savings, e.ss_savings, e.medicare_savings]
+        saving = sum(p for p in parts if p is not None) if any(p is not None for p in parts) else None
+    if saving is None or e.fee is None or e.fee <= 0:
+        return None
+    short = r2(e.fee - saving)
+    return short if short > CENT else None
+
+
 def _verdict(emp: EmployeeAudit):
     """One line a reader can act on. Plain words on purpose: the people who run this are not auditors."""
     g = emp.allotment_gap
     labels = {f.label for f in emp.findings}
+    if 'Gross pay changed between the two runs' in labels:
+        return 'Not comparable: gross pay changed between the two runs', 'grey'
     if g is None:
         if emp.before.net_pay is None and emp.after.net_pay is None:
             return 'No payslip found for this employee', 'grey'
@@ -823,8 +888,23 @@ def summarise(audits: list) -> dict:
     one = sum(1 for a in audits if (a.before.net_pay is None) != (a.after.net_pay is None))
     none = n - both - one
     unverified = [a for a in covered if a.verdict_class == 'red']
-    return dict(covered=len(covered), unverified=len(unverified),
-                population=dict(both=both, one=one, none=none, unmatched_statements=0),
+    # Employees whose pay changed between the runs are counted apart. Averaging them into a
+    # reconciliation total is how the headline becomes nonsense.
+    notcmp = [a for a in audits if not a.comparable]
+    losing = [a for a in audits if a.fee_exceeds_saving]
+    extra = {}
+    if notcmp:
+        extra['not_comparable'] = dict(
+            employees=len(notcmp),
+            names=sorted(a.name for a in notcmp)[:12],
+            biggest=r2(max((abs(a.gross_change or 0) for a in notcmp), default=0)))
+    if losing:
+        extra['fee_exceeds_saving'] = dict(
+            employees=len(losing), amount=r2(sum(a.fee_exceeds_saving for a in losing)),
+            names=sorted(a.name for a in losing)[:12])
+    return dict(covered=len(covered), unverified=len(unverified), **extra,
+                population=dict(both=both, one=one, none=none, unmatched_statements=0,
+                                not_comparable=len(notcmp)),
                 employees=n, matched=len(matched), attributed=len(attributed), unexplained=len(unexplained),
                 data_missing=len(missing), total_gap=r2(sum(gaps)) if gaps else None,
                 decreases=len([a for a in audits if (a.actual_net_change or 0) < 0]),

@@ -1133,6 +1133,7 @@ def to_paycheck(rec) -> Paycheck:
                     reimbursement=g('reimbursement'), fee=g('fee'), product=g('product'), retirement=g('retirement'),
                     cafeteria=g('cafeteria'), other_deductions=g('other_deductions'), source=rec.get('source', ''))
     pc.local = g('local')
+    pc.supplemental = g('supplemental')
     pc.local_code = rec.get('local_code') or ''
     pc.federal_unreliable = rec.get('federal_unreliable')
     for k in ('w4_status', 'w4_multijob', 'w4_children', 'w4_extra', 'retirement_line', 'other_total',

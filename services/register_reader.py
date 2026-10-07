@@ -17,9 +17,14 @@ the scanned one is checked against the roster. Neither returns a partial populat
 """
 import os, re, sys, tempfile, subprocess
 
-TOOLS = os.environ.get('ATTENTIVE_TOOLS', '/Users/nico/attentive/tools')
-if TOOLS not in sys.path:
-    sys.path.insert(0, TOOLS)
+# The readers are VENDORED at services/readers so the deployed image carries them. The old
+# behaviour imported them from a laptop path that the Docker image never had, so every register
+# fell back to the payslip reader and returned nothing. Sync with tools/sync_readers.py.
+VENDORED = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'readers')
+TOOLS = os.environ.get('ATTENTIVE_TOOLS', VENDORED)
+for _p in (TOOLS, VENDORED):
+    if os.path.isdir(_p) and _p not in sys.path:
+        sys.path.insert(0, _p)
 
 SS_RATE, MED_RATE = 0.062, 0.0145
 # Titles seen in the field. The Texas ESC report calls itself "Check Register for Payroll Run"
@@ -30,7 +35,13 @@ REGISTER_TITLE = re.compile(
     r'|check\s+(verification\s+)?register'
     r'|register\s+for\s+payroll\s+run'
     r'|pre\s*process\s+payroll'
-    r'|4packr01', re.I)
+    r'|payroll\s+earnings\s+register'
+    r'|4packr01'
+    r'|hrs2200', re.I)
+# TxEIS / Ascender. Its own banner names the program, which is the safest marker: the words
+# "Payroll Earnings Register" alone would also match other vendors.
+TXEIS_TITLE = re.compile(r'Program:\s*HRS2200|Pre-Post Payroll Earnings Register'
+                         r'|Payroll Earnings Register', re.I)
 
 
 def _first_page_text(data):
@@ -50,6 +61,8 @@ def looks_like_register(data):
     """A register, a payslip pack, or something else? Decided from the document, not the filename."""
     txt, path = _first_page_text(data)
     if txt.strip():
+        if TXEIS_TITLE.search(txt):
+            return 'txeis-register', path
         if REGISTER_TITLE.search(txt):
             return 'text-register', path
         return 'payslips', path
@@ -75,18 +88,28 @@ def looks_like_register(data):
 
 def _rec(name, src, gross=None, fed=None, state=None, local=None, local_code='',
          ss=None, med=None, net=None, taxable=None, medgross=None,
-         premium=None, fee=None, reimb=None, retirement=None, empid=None):
+         premium=None, fee=None, reimb=None, retirement=None, empid=None, supplemental=None):
     last, first = ('', '')
     if name and ',' in name:
         last, first = [x.strip() for x in name.split(',', 1)]
     elif name:
         last = name.strip()
+    # A register prints the full legal name, "ALBRIGHT, JAMES L" or "BELL, MELANIE JANE", while
+    # a census carries "James" and "Melanie". Keying on the whole first-name field never matches,
+    # and the fallback then matches on surname alone, which collapses the two Albrights and the
+    # two Potts into one another. Key on the first forename and keep the printed name for display.
+    first = first.split()[0] if first.split() else first
     return {k: v for k, v in dict(
+        # Figures from a register that tied to its own printed totals page are already correct.
+        # The payslip repair path (anchor to the census gross, then solve the identity) exists
+        # for OCR'd statements and must not touch these: anchoring overwrites the register's real
+        # gross with a census-derived one, which erases the very pay change the audit needs to see.
+        gated=True,
         name=name, employee_last_name=last, employee_first_name=first, employee_id=empid,
         gross=gross, federal=fed, state=state, local=local, local_code=local_code,
         social_security=ss, medicare=med, net_pay=net, taxable_wages=taxable,
         medicare_gross=medgross, premium=premium, fee=fee, reimbursement=reimb,
-        retirement=retirement, source=src).items() if v is not None}
+        retirement=retirement, supplemental=supplemental, source=src).items() if v is not None}
 
 
 def read_text_register(path, label):
@@ -106,6 +129,88 @@ def read_text_register(path, label):
     return out, dict(kind='text-register', employees=len(out),
                      period=__import__('services.parse_files', fromlist=['x']).period_of(reg.text[:200000]),
                      gate=[dict(control=c, parsed=g, printed=w) for c, g, w in reg.gate])
+
+
+def _txeis_programme_codes(reg):
+    """Find the premium, reimbursement and fee codes across the WHOLE register.
+
+    Not from one cheque. On a single cheque any ordinary pre-tax benefit also carries Caf-125 Y,
+    so picking the first one found returns a cancer policy instead of the premium. Two signatures
+    identify the programme, and both need the whole population:
+
+      premium and reimbursement are the SAME amount, the premium flagged Caf-125 Y and the
+      reimbursement flagged Ref Y. At Aspermont that is 161 and 162, both 1,173.00.
+
+      the fee is deducted from exactly the same employees as the premium and is flagged neither
+      pre-tax nor refund. At Aspermont that is 163 at 114.00.
+    """
+    who, amounts, flags = {}, {}, {}
+    for v in reg.emps.values():
+        for c, d in (v.get('ded') or {}).items():
+            if d.get('emple'):
+                who.setdefault(c, set()).add(v['name'])
+                amounts.setdefault(c, set()).add(round(d['emple'], 2))
+                flags[c] = (d.get('caf125'), d.get('ref'))
+    prem = reimb = fee = None
+    for c, (caf, ref) in flags.items():
+        if ref != 'Y' or len(amounts[c]) != 1:
+            continue
+        amt = next(iter(amounts[c]))
+        for c2, (caf2, ref2) in flags.items():
+            if c2 != c and caf2 == 'Y' and amounts[c2] == {amt} and who[c2] == who[c]:
+                prem, reimb = c2, c
+                break
+        if prem:
+            break
+    if prem:
+        cand = [c for c, (caf, ref) in flags.items()
+                if c not in (prem, reimb) and caf != 'Y' and ref != 'Y'
+                and who[c] == who[prem] and len(amounts[c]) == 1]
+        if cand:
+            fee = min(cand, key=lambda c: next(iter(amounts[c])))
+    return prem, reimb, fee
+
+
+def read_txeis_register(path, label):
+    """TxEIS / Ascender, program HRS2200. Seen at Aspermont ISD.
+
+    Two things this family gives that the others do not, and both matter:
+      * `Cafe 125` is the pre-tax total, and the per-employee deduction table carries a Caf-125
+        flag per code, which is this family's equivalent of the 4packr01 pre-tax flag.
+      * `Withld Grs` is the federal taxable wage and `Med Grs` the Medicare one, printed
+        separately, so no flag interpretation is needed to tell whether the premium came out of
+        each base.
+    """
+    import txeis_register as X
+    reg = X.read(path)
+    pc, rc, fc = _txeis_programme_codes(reg)
+    out = []
+    for code, v in reg.emps.items():
+        ded = v.get('ded', {})
+        g = lambda c: (ded.get(c, {}).get('emple') if c else None) or None
+        out.append(_rec(v['name'], '%s %s' % (label, os.path.basename(path)),
+                        gross=v.get('gross') or None,
+                        fed=v.get('wh_tax') or None,
+                        ss=v.get('fica_tax') or None,
+                        med=v.get('med_tax') or None,
+                        net=v.get('net') or None,
+                        taxable=v.get('wh_gross') or None,
+                        medgross=v.get('med_gross') or None,
+                        premium=g(pc), fee=g(fc), reimb=g(rc),
+                        retirement=v.get('trs_dep') or None,
+                        # Stipends, extra duty and the like. A census carries the contract
+                        # salary only, so this is the usual reason a payslip gross exceeds the
+                        # figure the proposal was built from.
+                        supplemental=v.get('suppl') or None,
+                        empid=code))
+    period = reg.period or {}
+    rep = dict(kind='txeis-register', employees=len(out),
+               layout='HRS2200 %s' % (reg.district or {}).get('name', ''),
+               codes=dict(premium=pc, reimbursement=rc, fee=fc),
+               period=({'period': (period.get('from'), period.get('thru')),
+                        'check_date': period.get('pay_date')} if period.get('from') else {}),
+               gate=[dict(control=c, parsed=p, printed=w) for c, p, w in reg.gate])
+    return out, rep
 
 
 def read_scanned_register(path, label, roster=None):
@@ -162,4 +267,6 @@ def read(data, label, roster=None):
         return None, None
     if kind == 'text-register':
         return read_text_register(path, label)
+    if kind == 'txeis-register':
+        return read_txeis_register(path, label)
     return read_scanned_register(path, label, roster=roster)
