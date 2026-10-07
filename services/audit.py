@@ -266,7 +266,7 @@ def audit_employee(emp: EmployeeAudit) -> EmployeeAudit:
             'The census salary does not include supplemental pay', None,
             'The payslip pays %s a month of supplemental pay on top of the contract salary. The '
             'census carries the contract salary only, so the proposal is built from a smaller '
-            'wage than payroll actually taxes.' % _m(per_month(sup, emp.pay_periods)),
+            'wage than payroll taxes.' % _m(per_month(sup, emp.pay_periods)),
             'Add supplemental pay to the census salary, or confirm it should be excluded.'))
     if emp.uncertainty and emp.uncertainty.get('cross_document') and emp.comparable:
         known = {round(abs(f.amount), 2) for f in emp.findings if f.amount is not None}

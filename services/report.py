@@ -154,7 +154,9 @@ def _recon_rows(a):
 
 def employee_block(doc, a, client=''):
     """Decision first: who, how much short, what to change. The proof follows in the order a reader checks it."""
-    h = _p(doc, f"{a.name.upper()}{', ' + client.upper() if client else ''}", size=11, bold=True, color=NAVY, space_after=2)
+    # Never all caps in client writing. A name set in capitals also reads as shouting in a
+    # document the client forwards to a district.
+    h = _p(doc, f"{a.name}{', ' + client if client else ''}", size=11, bold=True, color=NAVY, space_after=2)
     _keep(h)
     v = _p(doc, _verdict_sentence(a), size=9.5, bold=True,
            color=GREEN if a.verdict_class == 'green' else (RED if a.verdict_class == 'red' else NAVY), space_after=6)
@@ -285,7 +287,7 @@ def build(audits, summary, notes, client='', files=None, ai_paragraph='', period
     for s in doc.sections:
         s.left_margin = s.right_margin = Inches(0.85)
         s.top_margin = s.bottom_margin = Inches(0.8)
-    _p(doc, 'PAYROLL RECONCILIATION', size=20, bold=True, color=NAVY, space_after=0)
+    _p(doc, 'Payroll reconciliation', size=20, bold=True, color=NAVY, space_after=0)
     _p(doc, f"{client or 'Client'}{'  ·  ' + period if period else ''}", size=10, color=GREY, space_after=16)
     pm = summary.get('period_mismatch')
     if pm:

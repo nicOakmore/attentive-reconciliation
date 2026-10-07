@@ -205,7 +205,8 @@ def read_txeis_register(path, label):
                         empid=code))
     period = reg.period or {}
     rep = dict(kind='txeis-register', employees=len(out),
-               layout='HRS2200 %s' % (reg.district or {}).get('name', ''),
+               # The register prints the district in capitals. Our own prose does not shout.
+               layout='HRS2200 %s' % (reg.district or {}).get('name', '').title(),
                codes=dict(premium=pc, reimbursement=rc, fee=fc),
                period=({'period': (period.get('from'), period.get('thru')),
                         'check_date': period.get('pay_date')} if period.get('from') else {}),

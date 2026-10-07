@@ -179,7 +179,7 @@ def run(census_bytes=None, report_bytes=None, before=None, after=None, before_na
         summary['period_mismatch'] = dict(
             before='%s to %s' % pb['period'], after='%s to %s' % pa['period'],
             check_before=pb.get('check_date'), check_after=pa.get('check_date'))
-        notes.append('PAY PERIODS DO NOT MATCH: the before register covers %s to %s and the after '
+        notes.append('The pay periods do not match: the before register covers %s to %s and the after '
                      'register covers %s to %s. Differences between them include ordinary payroll '
                      'movement as well as the premium.' % (pb['period'] + pa['period']))
 
