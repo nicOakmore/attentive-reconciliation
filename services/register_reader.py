@@ -79,7 +79,6 @@ def looks_like_register(data):
             return 'payslips', path
         from PIL import Image
         titled = False
-        probe_page = pngs[1] if len(pngs) > 1 else pngs[0]
         for ang in (0, -90, 90):
             probe = os.path.join(d, 'probe%d.png' % ang)
             im = Image.open(pngs[0])
@@ -89,13 +88,28 @@ def looks_like_register(data):
                 break
         if not titled:
             return 'payslips', path
-        for ang in (0, -90, 90, 180):
-            shape = os.path.join(d, 'shape%d.png' % ang)
-            im = Image.open(probe_page)
-            (im if ang == 0 else im.rotate(ang, expand=True)).save(shape)
-            blocks = _blocks(_tokens(_ocr(shape)))
-            if sum(1 for b in blocks if any(t['t'] == 'Net' for t in b)) >= 2:
-                return 'scanned-register', path
+        # The shape probe runs at the reader's own 220 dpi and looks at the first three pages,
+        # routing to the register reader if ANY of them shows two or more employee blocks. One
+        # page at 150 dpi was not enough: under RapidOCR, the Linux engine, page two of the
+        # Breathing Association mock showed a single block, so a 29 employee register was sent
+        # down the payslip path and came back as eleven unusable records. A payslip pack shows
+        # zero blocks on every page, so three pages cannot misroute it the other way.
+        sd = os.path.join(d, 'shape')
+        os.makedirs(sd, exist_ok=True)
+        # Only the first three pages, at the reader's resolution. _render would rasterise the
+        # whole register, and a probe that costs as much as the read is not a probe.
+        subprocess.run(['pdftoppm', '-r', '220', '-png', '-f', '1', '-l', '3', path,
+                        os.path.join(sd, 'p')], capture_output=True, timeout=180)
+        import glob as _glob
+        shaped = sorted(_glob.glob(os.path.join(sd, 'p-*.png')))
+        for pg in shaped:
+            for ang in (0, -90, 90, 180):
+                shape = os.path.join(d, 'shape%d.png' % ang)
+                im = Image.open(pg)
+                (im if ang == 0 else im.rotate(ang, expand=True)).save(shape)
+                blocks = _blocks(_tokens(_ocr(shape)))
+                if sum(1 for b in blocks if any(t['t'] == 'Net' for t in b)) >= 2:
+                    return 'scanned-register', path
     except Exception:
         pass
     return 'payslips', path
