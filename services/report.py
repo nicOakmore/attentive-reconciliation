@@ -306,6 +306,15 @@ def build(audits, summary, notes, client='', files=None, ai_paragraph='', period
                 f"federal, Social Security and Medicare only, so none of this is counted and the figure "
                 f"quoted to those employees is low by that much. This runs in their favour, which is why "
                 f"it is easily missed.", space_after=10)
+    ur = summary.get('unreadable_files')
+    if ur:
+        _p(doc, 'A payroll file did not read properly', size=12, bold=True, color=RED, space_after=3)
+        for u in ur:
+            _p(doc, f"{u['file']} was read as {u['read']} statements and only {u['usable']} of them "
+                    f"carry both an employee name and a net pay. The figures for those employees "
+                    f"are not reliable and nothing in this document should be used for them. This "
+                    f"is usually a payroll layout no reader handles yet, or a scan too poor to "
+                    f"read. Send the register in another format if one is available.", space_after=10)
     nc = summary.get('not_comparable')
     if nc:
         _p(doc, 'Some employees cannot be reconciled because their pay changed',

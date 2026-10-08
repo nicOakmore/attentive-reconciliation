@@ -53,6 +53,7 @@ def run(census_bytes=None, report_bytes=None, before=None, after=None, before_na
     """before/after are (bytes, filename). census_more/report_more carry any further workbooks
     uploaded for the same slot. Returns (audits, summary, notes)."""
     notes = []
+    unreadable = []
     census_recs = _tables([census_bytes] + list(census_more or []),
                           P.CENSUS_WANTED, 'census', 'Census', notes) if census_bytes else []
     report_recs = _tables([report_bytes] + list(report_more or []),
@@ -118,6 +119,16 @@ def run(census_bytes=None, report_bytes=None, before=None, after=None, before_na
             failed = sum(1 for r in recs if not (r.get('name') or r.get('employee_id')))
             if failed:
                 notes.append(f'{label}: {failed} pages could not be read')
+            # A file that mostly did not read must not quietly become a reconciliation. Missouri
+            # Thistle is a multi-employee register in a layout no reader handles, so it falls to
+            # the payslip path and returns a handful of records with no name and no net. Those
+            # figures would be presented as a result. Say it instead.
+            usable = sum(1 for r in recs if r.get('name') and r.get('net_pay') is not None)
+            if recs and usable < 0.5 * len(recs):
+                unreadable.append(dict(label=label, file=fname, read=len(recs), usable=usable))
+                notes.append('%s: only %d of %d statements in %s carry both a name and a net pay. '
+                             'This file did not read properly and nothing below should be relied '
+                             'on for these employees.' % (label, usable, len(recs), fname))
             modelled = sum(1 for r in recs if 'model' in (r.get('source') or ''))
             notes.append(f'{label}: {len(recs)} statements read from {fname}'
                          + (f', of which {modelled} needed the model to locate a line' if modelled else ''))
@@ -207,6 +218,8 @@ def run(census_bytes=None, report_bytes=None, before=None, after=None, before_na
         notes.append(f'{len(corrected)} employees carry a recorded human correction to a figure on their statement')
     summary = summarise(audits)
     summary['population']['unmatched_statements'] = len(orphan_b) + len(orphan_a)
+    if unreadable:
+        summary['unreadable_files'] = unreadable
 
     # A before-and-after is only meaningful when both runs cover the SAME pay period. Where they
     # do not, every difference carries ordinary payroll movement as well as the premium, and the
