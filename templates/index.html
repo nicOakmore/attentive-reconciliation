@@ -92,13 +92,13 @@
         <div class="filename" id="fname-payroll_after"></div>
       </div>
       <div class="dropzone" id="box-census">
-        <input type="file" accept=".csv,.xlsx,.xls" onchange="pick(this,'census')">
+        <input multiple type="file" accept=".csv,.xlsx,.xls" onchange="pick(this,'census')">
         <span class="material-icons" style="font-size:32px;color:var(--grey-500);">groups</span>
         <div class="label">CENSUS</div><div class="hint">Master census template</div>
         <div class="filename" id="fname-census"></div>
       </div>
       <div class="dropzone" id="box-proposal">
-        <input type="file" accept=".csv,.xlsx,.xls" onchange="pick(this,'proposal')">
+        <input multiple type="file" accept=".csv,.xlsx,.xls" onchange="pick(this,'proposal')">
         <span class="material-icons" style="font-size:32px;color:var(--grey-500);">description</span>
         <div class="label">PROPOSAL</div><div class="hint">Savings report output</div>
         <div class="filename" id="fname-proposal"></div>
@@ -126,9 +126,13 @@
 <script>
 const files = {};
 function pick(input, key) {
-  files[key] = input.files[0] || null;
-  document.getElementById('fname-' + key).textContent = files[key] ? files[key].name : '';
-  document.getElementById('box-' + key).classList.toggle('has-file', !!files[key]);
+  // The census and proposal slots take several workbooks: a client's census often arrives as a
+  // master template plus addition files, and reading only the first loses those employees.
+  const chosen = Array.from(input.files || []);
+  files[key] = chosen.length ? chosen : null;
+  document.getElementById('fname-' + key).textContent =
+    !chosen.length ? '' : (chosen.length === 1 ? chosen[0].name : chosen.length + ' files: ' + chosen.map(f => f.name).join(', '));
+  document.getElementById('box-' + key).classList.toggle('has-file', !!chosen.length);
   document.getElementById('btn-run').disabled = !(files.census || files.proposal);
 }
 const money = v => v === null || v === undefined ? '' : (v < 0 ? '-$' : '$') + Math.abs(v).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
@@ -141,7 +145,7 @@ async function run(sample) {
   fd.append('client', document.getElementById('client').value);
   fd.append('period', document.getElementById('period').value);
   if (sample) fd.append('sample', sample);
-  else for (const k in files) if (files[k]) fd.append(k, files[k]);
+  else for (const k in files) if (files[k]) for (const f of files[k]) fd.append(k, f);
   document.getElementById('status').innerHTML = '<span class="spinner"></span> uploading';
   document.getElementById('btn-run').disabled = true;
   document.getElementById('dl').style.display = 'none';

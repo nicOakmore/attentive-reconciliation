@@ -72,7 +72,9 @@ def _render(pdf_path, d, dpi=220):
     return sorted(glob.glob(os.path.join(d, 'p-*.png')))
 
 
-_RAPID = None
+# One engine per thread. RapidOCR holds onnxruntime session state that is not safe to share,
+# and the pages are read in parallel below.
+_LOCAL = __import__('threading').local()
 
 
 def _ocr(png):
@@ -93,13 +95,13 @@ def _ocr(png):
                     for t, c, b in ocrmac.OCR(png, recognition_level='accurate').recognize()]
         except Exception:
             pass
-    global _RAPID
     from PIL import Image
-    if _RAPID is None:
+    eng = getattr(_LOCAL, 'rapid', None)
+    if eng is None:
         from rapidocr_onnxruntime import RapidOCR
-        _RAPID = RapidOCR()
+        eng = _LOCAL.rapid = RapidOCR()
     w, h = Image.open(png).size
-    res, _ = _RAPID(png)
+    res, _ = eng(png)
     out = []
     for box, text, conf in (res or []):
         xs = [p[0] for p in box]
@@ -489,8 +491,10 @@ def read_scanned(pdf_path, layout, expect_nets=None, expect_names=None, expect_r
         ang = _orient(d, pngs)
         json.dump(ang, open(rotfile, 'w'))
     from PIL import Image
-    pages = {}
-    for png in pngs:
+    from concurrent.futures import ThreadPoolExecutor
+
+    def one(png):
+        """Rotate and recognise a single page, reusing anything already cached on disk."""
         base = os.path.basename(png)
         rot = os.path.join(d, 'r-' + base)
         if not os.path.exists(rot):
@@ -498,8 +502,17 @@ def read_scanned(pdf_path, layout, expect_nets=None, expect_names=None, expect_r
             (im if ang == 0 else im.rotate(ang, expand=True)).save(rot)
         oj = os.path.join(d, 'o-' + base.replace('.png', '.json'))
         if not os.path.exists(oj):
-            json.dump(_ocr(rot), open(oj, 'w'))
-        pages[base] = _tokens(json.load(open(oj)))
+            tmp = oj + '.part'
+            json.dump(_ocr(rot), open(tmp, 'w'))
+            os.replace(tmp, oj)          # never leave a half written cache file behind
+        return base, _tokens(json.load(open(oj)))
+
+    # Recognising forty pages one after another is what made a scanned register a twenty minute
+    # job on the server. The pages are independent, and the engine is per thread, so read them
+    # together. Two workers by default: the box is small and onnxruntime is already threaded.
+    workers = max(1, int(os.environ.get('SCANREG_WORKERS', '2')))
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        pages = dict(ex.map(one, pngs))
 
     emps = []
     for pg, toks in pages.items():

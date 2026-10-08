@@ -24,6 +24,20 @@ def _file(field):
     return (f.read(), f.filename)
 
 
+def _files(field):
+    """Every file uploaded for one slot, as [(bytes, filename), ...].
+
+    A client's census and proposal are often split: Aspermont ISD arrives as a master template
+    plus four addition files, and taking only the first meant the run saw 13 of the 20 employees
+    the mock deducted and reported the rest as missing.
+    """
+    out = []
+    for f in request.files.getlist(field):
+        if f and f.filename:
+            out.append((f.read(), f.filename))
+    return out
+
+
 @app.get('/')
 def index():
     ok, model = groq_client.health()
@@ -64,6 +78,7 @@ def audit():
     client = (request.form.get('client') or '').strip()
     period = (request.form.get('period') or '').strip()
     sample = (request.form.get('sample') or '').strip()
+    census_all, rep_all = [], []
     try:
         if sample:
             d = os.path.join(SAMPLE_DIR, sample)
@@ -76,7 +91,9 @@ def audit():
             census, rep, before, after = rd(census_p), rd(report_p), rd(before_p), rd(after_p)
             client = client or sample
         else:
-            census, rep = _file('census'), _file('proposal')
+            census_all, rep_all = _files('census'), _files('proposal')
+            census = census_all[0] if census_all else None
+            rep = rep_all[0] if rep_all else None
             before, after = _file('payroll_before'), _file('payroll_after')
         if not (census or rep):
             return jsonify(error='Upload the census or the proposal report.'), 400
@@ -86,11 +103,13 @@ def audit():
 
     job = uuid.uuid4().hex[:12]
     JOBS[job] = dict(state='running', stage='reading the files', done=0, total=0, created=time.time())
-    threading.Thread(target=_work, args=(job, census, rep, before, after, client, period), daemon=True).start()
+    threading.Thread(target=_work, args=(job, census, rep, before, after, client, period),
+                     kwargs=dict(census_more=census_all[1:], report_more=rep_all[1:]),
+                     daemon=True).start()
     return jsonify(job=job, state='running')
 
 
-def _work(job, census, rep, before, after, client, period):
+def _work(job, census, rep, before, after, client, period, census_more=None, report_more=None):
     j = JOBS[job]
     t0 = time.time()
     try:
@@ -100,7 +119,8 @@ def _work(job, census, rep, before, after, client, period):
             j.update(done=done, total=total, stage=stage)
         audits, summary, notes = builder.run(census_bytes=census[0] if census else None,
                                              report_bytes=rep[0] if rep else None,
-                                             before=before, after=after, progress=progress)
+                                             before=before, after=after, progress=progress,
+                                             census_more=census_more, report_more=report_more)
         j.update(stage='writing the summary')
         files = [f"{label}: {blob[1]}" for label, blob in
                  (('Census', census), ('Proposal report', rep), ('Payroll before', before), ('Payroll after', after)) if blob]

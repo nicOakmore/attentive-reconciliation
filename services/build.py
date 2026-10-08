@@ -16,16 +16,47 @@ def pay_periods(v):
     return FREQ.get(s, 12)
 
 
-def run(census_bytes=None, report_bytes=None, before=None, after=None, before_name='', after_name='', progress=None):
-    """before/after are (bytes, filename). Returns (audits, summary, notes)."""
+def _tables(blobs, wanted, hint, label, notes):
+    """Read one slot, which may hold several workbooks, and merge their rows.
+
+    A client's census and proposal often arrive split: Aspermont ISD sends a master template plus
+    four addition files. Reading only the first meant the run saw 13 of the 20 employees the mock
+    deducted and called the rest missing. Later files win on a repeated employee, because an
+    addition file supersedes the master.
+    """
+    recs, seen = [], {}
+    for blob in blobs:
+        data, name = (blob if isinstance(blob, tuple) else (blob, ''))
+        if not data:
+            continue
+        try:
+            _, rows, t = P.read_table(data, wanted, sheet_hint=hint)
+        except Exception as e:
+            notes.append('%s: %s could not be read (%s)' % (label, name or 'file', str(e)[:90]))
+            continue
+        notes.append('%s: %d rows from sheet "%s"%s'
+                     % (label, len(rows), t, (' of ' + name) if name else ''))
+        for r in rows:
+            k = P.name_key(r.get('first_name') or r.get('employee_first_name'),
+                           r.get('last_name') or r.get('employee_last_name'))
+            if k.strip() and k in seen:
+                recs[seen[k]] = r
+            else:
+                if k.strip():
+                    seen[k] = len(recs)
+                recs.append(r)
+    return recs
+
+
+def run(census_bytes=None, report_bytes=None, before=None, after=None, before_name='', after_name='',
+        progress=None, census_more=None, report_more=None):
+    """before/after are (bytes, filename). census_more/report_more carry any further workbooks
+    uploaded for the same slot. Returns (audits, summary, notes)."""
     notes = []
-    census_recs, report_recs = [], []
-    if census_bytes:
-        _, census_recs, t = P.read_table(census_bytes, P.CENSUS_WANTED, sheet_hint='census')
-        notes.append(f'Census: {len(census_recs)} rows from sheet "{t}"')
-    if report_bytes:
-        _, report_recs, t = P.read_table(report_bytes, P.REPORT_WANTED, sheet_hint='savings')
-        notes.append(f'Proposal report: {len(report_recs)} rows from sheet "{t}"')
+    census_recs = _tables([census_bytes] + list(census_more or []),
+                          P.CENSUS_WANTED, 'census', 'Census', notes) if census_bytes else []
+    report_recs = _tables([report_bytes] + list(report_more or []),
+                          P.REPORT_WANTED, 'savings', 'Proposal report', notes) if report_bytes else []
 
     store_stats = {}
     periods = {}
